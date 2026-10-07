@@ -1,0 +1,6 @@
+---
+description: Read the ThinkPad fan skills before changing the controller, the window, or the driver code.
+alwaysApply: true
+---
+
+Before changing the fan controller, the WPF window, or the PawnIO client, read `.cursor/skills/thinkpad-ec/SKILL.md`, `.cursor/skills/fan-safety/SKILL.md`, and `.cursor/skills/library-fan-ui/SKILL.md`.

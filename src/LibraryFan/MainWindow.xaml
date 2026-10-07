@@ -1,0 +1,135 @@
+<Window x:Class="LibraryFan.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LibraryFan"
+        Title="Library Fan"
+        Width="1120" Height="740" MinWidth="960" MinHeight="680"
+        Background="#0B0E13" Foreground="{StaticResource Ink}"
+        FontFamily="Segoe UI Variable, Segoe UI"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        AutomationProperties.AutomationId="LibraryFanWindow">
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <Grid VerticalAlignment="Center">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <StackPanel VerticalAlignment="Center">
+        <TextBlock Text="Library Fan" FontSize="18" FontWeight="SemiBold"/>
+        <TextBlock Text="ThinkPad P1" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,2,0,0"/>
+      </StackPanel>
+      <Border x:Name="ModePill" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0"
+              MinWidth="120" Height="40" CornerRadius="12" Padding="16,0"
+              Background="{StaticResource Teal}">
+        <TextBlock x:Name="ModePillText" Text="BIOS" FontSize="12" FontWeight="SemiBold"
+                   Foreground="{StaticResource OnAccent}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="1" Style="{StaticResource Surface}" Padding="16,12" Margin="0,8,0,0">
+      <StackPanel>
+        <TextBlock x:Name="ReasonText" TextWrapping="Wrap" FontSize="20" FontWeight="SemiBold"
+                   AutomationProperties.AutomationId="ReasonText"/>
+        <TextBlock x:Name="RefusalText" TextWrapping="Wrap" FontSize="13"
+                   Foreground="{StaticResource Coral}" Margin="0,6,0,0"
+                   Visibility="Collapsed"
+                   AutomationProperties.AutomationId="RefusalText"/>
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="2" Margin="0,8,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <local:FanRing x:Name="Fan1" Margin="0,0,8,0" AutomationProperties.AutomationId="Fan1Rpm"/>
+      <local:FanRing x:Name="Fan2" Grid.Column="1" Margin="8,0" AutomationProperties.AutomationId="Fan2Rpm"/>
+      <Border Grid.Column="2" Style="{StaticResource Surface}" Padding="16" Margin="8,0,0,0">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <DockPanel>
+            <TextBlock Text="LAST FEW MINUTES" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Border Width="16" Height="4" CornerRadius="2" Background="{StaticResource Teal}" VerticalAlignment="Center"/>
+              <TextBlock Text="Temperature" Foreground="{StaticResource Muted}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center"/>
+              <Border Width="16" Height="4" CornerRadius="2" Background="{StaticResource Amber}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <TextBlock Text="Fan speed" Foreground="{StaticResource Muted}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+          </DockPanel>
+          <Grid Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock x:Name="TracePlaceholder" Text="Waiting for the first samples."
+                       Foreground="{StaticResource Muted}" FontSize="13"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Canvas x:Name="TraceCanvas" ClipToBounds="True"/>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="3" Style="{StaticResource Surface}" Padding="8" Margin="0,8,0,0">
+      <UniformGrid x:Name="SensorHost" Columns="12" Rows="1"/>
+    </Border>
+
+    <Border Grid.Row="4" Style="{StaticResource Surface}" Padding="12" Margin="0,8,0,0">
+      <Grid VerticalAlignment="Center">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="MODE" Style="{StaticResource SectionLabel}"/>
+          <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+            <Button x:Name="BiosButton" Content="BIOS" MinWidth="112" Click="BiosClick"
+                    Style="{StaticResource ModeButton}" AutomationProperties.AutomationId="ModeBios"/>
+            <Button x:Name="LibraryButton" Content="Library" MinWidth="112" Margin="8,0,0,0" Click="LibraryClick"
+                    Style="{StaticResource ModeButton}" AutomationProperties.AutomationId="ModeLibrary"/>
+            <Button x:Name="ManualButton" Content="Manual" MinWidth="112" Margin="8,0,0,0" Click="ManualClick"
+                    Style="{StaticResource ModeButton}" AutomationProperties.AutomationId="ModeManual"/>
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+          <TextBlock Text="REGISTER 0x2F" Style="{StaticResource SectionLabel}" HorizontalAlignment="Right"/>
+          <StackPanel x:Name="LevelHost" Orientation="Horizontal" Margin="0,8,0,0"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="5" Margin="0,8,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <StackPanel x:Name="StatusHost" VerticalAlignment="Center">
+        <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/>
+      </StackPanel>
+      <Border x:Name="SimPanel" Grid.Column="1" Style="{StaticResource Surface}" Padding="14,0" Height="40" Width="340"
+              AutomationProperties.AutomationId="SimPanel">
+        <DockPanel VerticalAlignment="Center">
+          <TextBlock Text="Temperature" Foreground="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" DockPanel.Dock="Left"/>
+          <TextBlock x:Name="SimTempLabel" Foreground="{StaticResource Ink}" FontSize="13" FontWeight="SemiBold"
+                     Width="40" TextAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+          <Slider x:Name="SimTemp" Minimum="30" Maximum="95" Value="48" Margin="12,0,0,0"
+                  Style="{StaticResource MeterSlider}" VerticalAlignment="Center"
+                  AutomationProperties.AutomationId="SimTemp"/>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

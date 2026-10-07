@@ -1,0 +1,10 @@
+{
+  "offBelowCelsius": 55,
+  "hysteresisCelsius": 3,
+  "steps": [
+    { "celsius": 55, "level": 1 },
+    { "celsius": 62, "level": 2 },
+    { "celsius": 68, "level": 3 },
+    { "celsius": 74, "level": 4 }
+  ]
+}
