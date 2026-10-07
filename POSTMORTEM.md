@@ -141,6 +141,46 @@ Independent left and right levels were deferred until a read-only probe showed f
 
 - [ ] Add a license for everything that is not `third_party/pawnio`.
 - [ ] Keep `COPYING` next to `LpcACPIEC.bin`, and link the PawnIO.Modules release the file came from (0.2.11), or stop vendoring the binary and document where to get it.
-- [ ] Set the git author locally, review the staged set, and include `Open Library Fan.cmd` plus the elevation change.
+- [x] Set the git author locally, review the staged set, and include `Open Library Fan.cmd` plus the elevation change. (Committed with a one-shot author and pushed to a private repository on 7 October.)
 - [ ] Say in the repository description that this is one BIOS on one P1 Gen 3.
 - [ ] Do not document bit 6 as a feature.
+
+## Rebuild, 7 October 2026
+
+After the first build was published, the whole tree was rewritten with what the incidents above had taught. The register map, the 80°C rule, and PawnIO stayed. Everything else was written again rather than patched.
+
+### What changed in the reader
+
+- Each byte is read on its own. `EcBus` settles the controller first, waits for the input buffer, drains a stale output byte if one is there, and retries a byte three times before giving up on it.
+- A snapshot survives a failed byte. `SensorSample.Raw` is nullable: a byte that was not read is `…` on screen, a byte that read as `0x00` or `0x80` is `—`. The snapshot is readable when any register answered, and three consecutive failed registers end it early so a dead controller does not cost 14 timeouts per poll.
+- The poll runs every second instead of every two.
+- A fan speed that fails to read is held from the previous poll for up to three polls, marked `LAST READ`. The hold is display only. It never counts as a live reading, so it never unlocks level writes.
+- A level is written when it changes and refreshed every 30 seconds. `0x80` is written once per transition. The old loop rewrote the same byte every poll.
+
+### What changed around it
+
+- `UseAppHost=false`. There is no exe to block. `Open Library Fan.cmd` builds Release when needed and starts `dotnet exec`. Elevation relaunches `dotnet.exe exec "<dll>"`.
+- `--snapshot <path>` renders the client area from inside the process, which is the only capture that works once the app is elevated. `--snapshot-after`, `--sim-temp`, and `--mode` set up a scene on the simulator; the last two are ignored without `--simulate`, so nothing on the command line can make the hardware build take over at start.
+- Tests: ten safety, eight protocol, nine reading, one hardware probe that returns early unless elevated, and one window test. Twenty-eight pass without elevation; the probe passed elevated.
+
+### Hardware result
+
+The elevated probe read all 14 registers on both passes: fan 1 at 2561 then 2489 RPM, fan 2 at 2360 then 2284 RPM, `0x78` at 42–43°C, five temperature bytes valid and seven missing. Library wrote `0x00` at 43°C, which is the curve's choice below 55°C, and the probe restored `0x80`. The window then ran for several minutes with steady speeds and no dropouts. `0xC2`, which read 1°C on the first build, read as missing this time.
+
+### The window
+
+The second pass on the window kept the one radius, one border, and one button height, and made the panel say more:
+
+- Fans are 270° gauges on a fixed 0–6000 RPM scale with the rotor turning inside. The scale is printed at both ends.
+- The trace has fixed axes, 30–90°C and 0–6k RPM on one grid, a dashed line at 80°C, time marks, and a dot on the newest sample.
+- Sensor tiles carry a heat bar. Colour means temperature everywhere: teal, amber from 65°C, coral at 80°C.
+- A link pill reads `LIVE`, `PARTIAL`, `NO ANSWER`, or `OFFLINE` and beats once per poll, so a missed poll is visible without reading the footer.
+- The Library curve is shown as chips with the held step outlined, and the register label says what `0x2F` holds.
+- The gauges shrink with their captions when the window is short. The first layout clipped the command label once the mode card grew; the fix was a down-only viewbox, not a taller minimum.
+
+### Still open
+
+- A plausibility rule for temperature bytes beyond `0x00` and `0x80`.
+- Independent left and right levels, pending evidence that fan 2 moves on its own.
+- A license, and the LGPL source offer for the vendored module.
+- Logon startup and a driver-side fallback if the process is killed.

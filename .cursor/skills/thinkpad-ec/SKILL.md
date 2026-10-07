@@ -28,8 +28,18 @@ Commands, from the ACPI embedded-controller spec and the fork's `portio.cpp`:
 - `0x2F` commands the selected fan. `0x80` hands control to BIOS. `0` through `7` are manual levels.
 - Never set bit 6 (`0x40`). That bit is disengaged full speed.
 - RPM is a 16-bit word. Select the fan, read `0x84` first, then `0x85`. Values above `0x1FFF` are stale and do not count as a live reading. `0` is a real stopped fan.
-- Temperatures are the bytes at `0x78`–`0x7F` and `0xC0`–`0xC3`. Bytes `0x00` and `0x80` are missing, not temperatures. 80°C is decimal 80 (`0x50`).
+- Temperatures are the bytes at `0x78`–`0x7F` and `0xC0`–`0xC3`. Bytes `0x00` and `0x80` are missing, not temperatures. 80°C is decimal 80 (`0x50`). On this machine `0x78`, `0x7A`, `0x7C`, `0x7D`, and `0x7E` read as temperatures; the rest read as missing, and `0xC2` once read 1°C, so a byte can pass the missing rule and still be nonsense.
 - A level write goes to both fans: select, write `0x2F`, read it back, retry up to five times.
+
+## Sharing the ports
+
+The Windows ACPI driver uses the same two ports, so a single byte read can time out or come back stale. Treat that as normal, not as a disconnect:
+
+- Settle before each transaction: wait for the input buffer to clear, and if the output buffer is still full, read the data port once to drain the stale byte.
+- Retry each byte up to three times before giving up on that byte.
+- A byte that still fails leaves that one register unread. The rest of the snapshot stands. Three consecutive failed registers end the snapshot early.
+- A snapshot is readable when any register answered. Three unreadable snapshots in a row are the disconnect that hands control back.
+- Poll once a second.
 
 ## Driver
 

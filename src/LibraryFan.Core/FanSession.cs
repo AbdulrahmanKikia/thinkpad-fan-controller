@@ -12,19 +12,29 @@ public sealed class FanDecision
     public required ControlMode Mode { get; init; }
     public required bool IsLatched { get; init; }
     public required string Reason { get; set; }
+    public required bool CanTakeControl { get; init; }
     public string? Refusal { get; init; }
     public bool HasCommand { get; set; }
     public byte Command { get; init; }
     public bool CommandRequiresLiveFans { get; init; }
     public int? CommandedLevel { get; init; }
     public bool BothFansSeen { get; set; }
-    public bool CanTakeControl { get; init; }
 }
 
+/// <summary>
+/// The safety guard in front of every write to register 0x2F. Library and Manual both go through it.
+/// One valid sensor at 80°C hands both fans to firmware and latches there. Three unreadable polls
+/// do the same. Level writes wait until both fan speeds have been read live this session.
+/// </summary>
 public sealed class FanSession
 {
     public const int DangerCelsius = 80;
     public const int BadPollsBeforeHandoff = 3;
+
+    public const string BiosSentence = "BIOS is in control.";
+    public const string ThermalHandoff = "Handed control back to the machine because a sensor reached 80°C.";
+    public const string ReadHandoff = "Handed control back to the machine because the controller could not be read.";
+    public const string StillHot = "A sensor is still at 80°C, so the machine stays in control.";
 
     private readonly LibraryCurve _curve;
     private ControlMode _mode = ControlMode.Bios;
@@ -43,6 +53,7 @@ public sealed class FanSession
         _curve = curve ?? new LibraryCurve();
     }
 
+    public LibraryCurve Curve => _curve;
     public ControlMode Mode => _mode;
     public bool IsLatched => _latched;
     public bool BothFansSeen => _seenFan1 && _seenFan2;
@@ -57,8 +68,8 @@ public sealed class FanSession
         if (reading.Fan2Live)
             _seenFan2 = true;
 
-        if (reading.Ok && reading.IsDangerous)
-            return Trip("Handed control back to the machine because a sensor reached 80°C.");
+        if (reading.IsDangerous)
+            return Trip(ThermalHandoff);
 
         if (!reading.Ok || !reading.ValidSensors.Any())
             return NoteBadPoll();
@@ -72,17 +83,15 @@ public sealed class FanSession
 
     public FanDecision Request(ControlMode mode, int manualLevel = 1)
     {
-        manualLevel = Math.Clamp(manualLevel, 0, 7);
+        manualLevel = Math.Clamp(manualLevel, 0, Registers.MaxLevel);
         if (mode != ControlMode.Bios && _last.IsDangerous)
         {
             return Speak(new FanDecision
             {
                 Mode = ControlMode.Bios,
                 IsLatched = _latched,
-                Reason = _latched
-                    ? _latchReason
-                    : "BIOS is in control.",
-                Refusal = "A sensor is still at 80°C, so the machine stays in control.",
+                Reason = _latched ? _latchReason : BiosSentence,
+                Refusal = StillHot,
                 CanTakeControl = false
             });
         }
@@ -106,16 +115,14 @@ public sealed class FanSession
     {
         _badPolls++;
         if (_badPolls >= BadPollsBeforeHandoff)
-            return Trip("Handed control back to the machine because the controller could not be read.");
+            return Trip(ReadHandoff);
 
-        var reason = _mode switch
+        var reason = _latched ? _latchReason : _mode switch
         {
             ControlMode.Library => "Library is waiting for a temperature reading.",
             ControlMode.Manual => $"Manual is holding level {_manualLevel}.",
-            _ => "BIOS is in control."
+            _ => BiosSentence
         };
-        if (_latched)
-            reason = _latchReason;
 
         return Speak(new FanDecision
         {
@@ -145,40 +152,27 @@ public sealed class FanSession
         });
     }
 
-    private FanDecision HoldLatch()
+    private FanDecision HoldLatch() => Speak(new FanDecision
     {
-        return Speak(new FanDecision
-        {
-            Mode = ControlMode.Bios,
-            IsLatched = true,
-            Reason = _latchReason,
-            CanTakeControl = !_last.IsDangerous
-        });
-    }
+        Mode = ControlMode.Bios,
+        IsLatched = true,
+        Reason = _latchReason,
+        CanTakeControl = !_last.IsDangerous
+    });
 
     private FanDecision ApplyActive(FanReading reading)
     {
-        if (_restorePending && _mode == ControlMode.Bios)
+        if (_mode == ControlMode.Bios)
         {
+            var restore = _restorePending;
             _restorePending = false;
             return new FanDecision
             {
                 Mode = ControlMode.Bios,
                 IsLatched = false,
-                Reason = "BIOS is in control.",
-                HasCommand = true,
+                Reason = BiosSentence,
+                HasCommand = restore,
                 Command = Registers.BiosControl,
-                CanTakeControl = true
-            };
-        }
-
-        if (_mode == ControlMode.Bios)
-        {
-            return new FanDecision
-            {
-                Mode = ControlMode.Bios,
-                IsLatched = false,
-                Reason = "BIOS is in control.",
                 CanTakeControl = true
             };
         }
@@ -217,18 +211,19 @@ public sealed class FanSession
     {
         if (_mode == ControlMode.Bios)
         {
+            var restore = _restorePending;
+            _restorePending = false;
             return new FanDecision
             {
                 Mode = ControlMode.Bios,
-                IsLatched = _latched,
-                Reason = _latched ? _latchReason : "BIOS is in control.",
-                HasCommand = _restorePending,
+                IsLatched = false,
+                Reason = BiosSentence,
+                HasCommand = restore,
                 Command = Registers.BiosControl,
                 CanTakeControl = !_last.IsDangerous
             };
         }
 
-        _restorePending = false;
         return new FanDecision
         {
             Mode = _mode,
@@ -246,20 +241,11 @@ public sealed class FanSession
         if (decision.HasCommand && decision.CommandRequiresLiveFans && !BothFansSeen)
         {
             decision.HasCommand = false;
-            decision.Reason = decision.Mode switch
-            {
-                ControlMode.Library => WaitingLibrary(decision),
-                ControlMode.Manual => $"Manual wants level {_manualLevel}. Both fan speeds have not been read yet, so the controller has not taken over.",
-                _ => decision.Reason
-            };
+            var level = decision.CommandedLevel?.ToString() ?? "a level";
+            var who = decision.Mode == ControlMode.Manual ? "Manual" : "Library";
+            decision.Reason = $"{who} wants level {level}. Both fan speeds have not been read yet, so the controller has not taken over.";
         }
 
         return decision;
-    }
-
-    private static string WaitingLibrary(FanDecision decision)
-    {
-        var level = decision.CommandedLevel?.ToString() ?? "a level";
-        return $"Library wants level {level}. Both fan speeds have not been read yet, so the controller has not taken over.";
     }
 }

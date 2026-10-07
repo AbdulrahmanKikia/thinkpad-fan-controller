@@ -1,10 +1,13 @@
 namespace LibraryFan;
 
+/// <summary>A fake controller for <c>--simulate</c>. It never opens a port.</summary>
 public sealed class SimulatedEc : IEcClient
 {
     private readonly Dictionary<byte, byte> _sensors = new();
     private int _hottest = 48;
     private int _failReads;
+    private int _dropRpm;
+    private int _reads;
 
     public SimulatedEc()
     {
@@ -29,7 +32,11 @@ public sealed class SimulatedEc : IEcClient
         }
     }
 
-    public void FailReads(int count) => _failReads = count;
+    public void FailReads(int polls) => _failReads = polls;
+
+    public void DropRpm(int polls) => _dropRpm = polls;
+
+    public void SetRawSensor(byte address, byte raw) => _sensors[address] = raw;
 
     public FanReading Read()
     {
@@ -39,12 +46,29 @@ public sealed class SimulatedEc : IEcClient
             return FanReading.Unreadable;
         }
 
-        var level = LastCommand is null or Registers.BiosControl
-            ? 3
-            : LastCommand.Value;
+        var sensors = Registers.TemperatureAddresses
+            .Select(address => new SensorSample { Address = address, Raw = _sensors[address] })
+            .ToArray();
+
+        if (_dropRpm > 0)
+        {
+            _dropRpm--;
+            return new FanReading
+            {
+                Ok = true,
+                Sensors = sensors,
+                RegistersRead = sensors.Length,
+                RegistersTotal = Registers.SnapshotRegisters
+            };
+        }
+
+        var level = LastCommand is null or Registers.BiosControl ? 3 : LastCommand.Value;
         var rpm = level == 0 ? 0 : 800 + (level * 450);
         if (LastCommand == Registers.BiosControl)
             rpm = 2100;
+        // A real tachometer wanders by a few tens of RPM between polls; so does the fake one.
+        if (rpm > 0)
+            rpm += (int)Math.Round(30 * Math.Sin(_reads++ * 0.7));
 
         return new FanReading
         {
@@ -53,9 +77,9 @@ public sealed class SimulatedEc : IEcClient
             Fan2Rpm = Math.Max(0, rpm - 80),
             Fan1Live = true,
             Fan2Live = true,
-            Sensors = Registers.TemperatureAddresses
-                .Select(address => new SensorSample { Address = address, Raw = _sensors[address] })
-                .ToArray()
+            Sensors = sensors,
+            RegistersRead = Registers.SnapshotRegisters,
+            RegistersTotal = Registers.SnapshotRegisters
         };
     }
 
@@ -70,17 +94,35 @@ public sealed class SimulatedEc : IEcClient
 
     public void RestoreBios() => TryWrite(Registers.BiosControl);
 
-    public void SetRawSensor(byte address, byte raw) => _sensors[address] = raw;
-
     public void Dispose()
     {
     }
 
     private void ApplyHottest()
     {
-        var primary = Registers.TemperatureAddresses[0];
         foreach (var address in Registers.TemperatureAddresses)
             _sensors[address] = (byte)Math.Clamp(_hottest - 6, 1, 120);
-        _sensors[primary] = (byte)Math.Clamp(_hottest, 0, 255);
+        _sensors[0x78] = (byte)_hottest;
+    }
+}
+
+/// <summary>Stands in for the driver when it is missing or the process is not elevated.</summary>
+public sealed class UnavailableEc : IEcClient
+{
+    public UnavailableEc(string status) => Status = status;
+
+    public bool IsOpen => false;
+    public string Status { get; }
+
+    public FanReading Read() => FanReading.Unreadable;
+
+    public bool TryWrite(byte command) => false;
+
+    public void RestoreBios()
+    {
+    }
+
+    public void Dispose()
+    {
     }
 }

@@ -1,4 +1,3 @@
-using LibraryFan;
 using Xunit;
 using static LibraryFan.Tests.Samples;
 
@@ -20,18 +19,21 @@ public class SafetyTests
         Assert.True(trip.IsLatched);
         Assert.True(trip.HasCommand);
         Assert.Equal(Registers.BiosControl, trip.Command);
-        Assert.Equal("Handed control back to the machine because a sensor reached 80°C.", trip.Reason);
+        Assert.Equal(FanSession.ThermalHandoff, trip.Reason);
 
         var refused = session.Request(ControlMode.Manual, 4);
         Assert.False(refused.HasCommand);
         Assert.Contains("stays in control", refused.Refusal);
         Assert.Equal(ControlMode.Bios, session.Mode);
 
-        session.Tick(Sample(70));
+        var stillLatched = session.Tick(Sample(70));
+        Assert.True(stillLatched.IsLatched);
+        Assert.False(stillLatched.HasCommand);
+
         var resumed = session.Request(ControlMode.Library);
         Assert.Equal(ControlMode.Library, resumed.Mode);
         Assert.False(resumed.IsLatched);
-        Assert.Contains("Library is holding level", resumed.Reason);
+        Assert.StartsWith("Library is holding level", resumed.Reason);
     }
 
     [Fact]
@@ -44,6 +46,16 @@ public class SafetyTests
         Assert.Equal(Registers.BiosControl, trip.Command);
         Assert.True(trip.IsLatched);
         Assert.DoesNotContain("level", trip.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Bios_mode_also_hands_back_and_latches_at_80()
+    {
+        var session = new FanSession();
+        session.Tick(Sample(60));
+        var trip = session.Tick(Sample(81));
+        Assert.True(trip.IsLatched);
+        Assert.Equal(Registers.BiosControl, trip.Command);
     }
 
     [Fact]
@@ -75,7 +87,21 @@ public class SafetyTests
         var third = session.Tick(FanReading.Unreadable);
         Assert.True(third.IsLatched);
         Assert.Equal(Registers.BiosControl, third.Command);
-        Assert.Contains("could not be read", third.Reason);
+        Assert.Equal(FanSession.ReadHandoff, third.Reason);
+    }
+
+    [Fact]
+    public void A_good_poll_resets_the_bad_poll_streak()
+    {
+        var session = new FanSession();
+        session.Tick(Sample(60));
+        session.Request(ControlMode.Library);
+        session.Tick(FanReading.Unreadable);
+        session.Tick(FanReading.Unreadable);
+        session.Tick(Sample(60));
+        session.Tick(FanReading.Unreadable);
+        var decision = session.Tick(FanReading.Unreadable);
+        Assert.False(decision.IsLatched);
     }
 
     [Fact]
@@ -90,15 +116,10 @@ public class SafetyTests
         Assert.Equal((byte)2, level2.Command);
         Assert.Contains("0x78 is 64°C", level2.Reason);
 
-        var held = session.Tick(Sample(60));
-        Assert.Equal((byte)2, held.Command);
-
-        var down = session.Tick(Sample(58));
-        Assert.Equal((byte)1, down.Command);
-
-        var stillOn = session.Tick(Sample(55));
-        Assert.Equal((byte)1, stillOn.Command);
-        Assert.NotEqual((byte)0, stillOn.Command);
+        Assert.Equal((byte)2, session.Tick(Sample(60)).Command);
+        Assert.Equal((byte)1, session.Tick(Sample(58)).Command);
+        Assert.Equal((byte)1, session.Tick(Sample(55)).Command);
+        Assert.Equal((byte)0, session.Tick(Sample(50)).Command);
     }
 
     [Fact]
@@ -118,140 +139,28 @@ public class SafetyTests
     }
 
     [Fact]
-    public void Disengaged_full_speed_is_rejected()
+    public void Choosing_bios_writes_the_restore_once()
     {
-        var ports = new FakePorts();
-        Assert.False(ThinkPadEc.TryCommandBoth(ports, Registers.DisengagedFullSpeed));
-        Assert.DoesNotContain(ports.Ops, op => op.Contains("out 40", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Rpm_low_byte_is_read_before_the_high_byte()
-    {
-        var ports = new FakePorts { Fan1 = 1500, Fan2 = 1400 };
-        Assert.True(ThinkPadEc.TryReadSnapshot(ports, out var reading));
-        Assert.Equal(1500, reading.Fan1Rpm);
-        Assert.Equal(1400, reading.Fan2Rpm);
-        var fan2 = ports.Ops.IndexOf("out 01");
-        var low = ports.Ops.IndexOf("out 84");
-        var high = ports.Ops.IndexOf("out 85");
-        Assert.True(fan2 >= 0 && fan2 < low && low < high);
-    }
-
-    [Fact]
-    public void Stale_rpm_is_not_a_live_reading()
-    {
-        var ports = new FakePorts { Fan1 = 0x2000, Fan2 = 1000 };
-        Assert.True(ThinkPadEc.TryReadSnapshot(ports, out var reading));
-        Assert.False(reading.Fan1Live);
-        Assert.Null(reading.Fan1Rpm);
-        Assert.True(reading.Fan2Live);
+        var session = new FanSession();
+        session.Tick(Sample(60));
+        session.Request(ControlMode.Manual, 2);
+        var bios = session.Request(ControlMode.Bios);
+        Assert.True(bios.HasCommand);
+        Assert.Equal(Registers.BiosControl, bios.Command);
+        var steady = session.Tick(Sample(60));
+        Assert.False(steady.HasCommand);
     }
 
     [Fact]
     public void Closing_the_controller_restores_bios_without_touching_ports_in_the_simulator()
     {
         var sim = new SimulatedEc();
-        var controller = new FanController(sim, new FanSession());
+        var controller = new FanController(sim, new FanSession(), poll: false);
+        controller.Poll();
         controller.Request(ControlMode.Manual, 3);
+        Assert.Equal((byte)3, sim.LastCommand);
         controller.Dispose();
         Assert.Equal(Registers.BiosControl, sim.LastCommand);
         Assert.Equal(0, sim.PortTouches);
     }
-}
-
-static class Samples
-{
-    public static FanReading Sample(int temperature, bool liveFans = true) 
-    {
-        var sensors = CoolSensors(temperature);
-        sensors[0] = new SensorSample { Address = 0x78, Raw = (byte)temperature };
-        return Reading(sensors, liveFans);
-    }
-
-    public static SensorSample[] CoolSensors(int temperature)
-    {
-        return Registers.TemperatureAddresses
-            .Select(address => new SensorSample
-            {
-                Address = address,
-                Raw = (byte)Math.Clamp(temperature - 5, 1, 79)
-            })
-            .ToArray();
-    }
-
-    public static FanReading Reading(SensorSample[] sensors, bool liveFans = true) => new()
-    {
-        Ok = true,
-        Fan1Rpm = liveFans ? 1200 : null,
-        Fan2Rpm = liveFans ? 1100 : null,
-        Fan1Live = liveFans,
-        Fan2Live = liveFans,
-        Sensors = sensors
-    };
-}
-
-sealed class FakePorts : IPortIo
-{
-    public byte[] Ram = new byte[256];
-    public List<string> Ops = new();
-    public int Fan1 { get; set; } = 1000;
-    public int Fan2 { get; set; } = 1000;
-    private byte _status;
-    private byte _pending;
-    private byte _writeOffset;
-    private int _writePhase;
-
-    public bool ReadPort(ushort port, out byte value)
-    {
-        if (port == Registers.ControlPort)
-        {
-            value = _status;
-            return true;
-        }
-
-        value = _pending;
-        _status = 0;
-        Ops.Add($"in {value:X2}");
-        return true;
-    }
-
-    public bool WritePort(ushort port, byte value)
-    {
-        if (port == Registers.ControlPort)
-        {
-            _writePhase = value == Registers.CommandWrite ? 1 : 0;
-            _status = 0;
-            Ops.Add($"cmd {value:X2}");
-            return true;
-        }
-
-        Ops.Add($"out {value:X2}");
-        if (_writePhase == 1)
-        {
-            _writeOffset = value;
-            _writePhase = 2;
-            _status = 0;
-            return true;
-        }
-
-        if (_writePhase == 2)
-        {
-            Ram[_writeOffset] = value;
-            _writePhase = 0;
-            _status = 0;
-            return true;
-        }
-
-        _pending = value switch
-        {
-            Registers.FanSpeedLow => (byte)(SelectedRpm & 0xFF),
-            Registers.FanSpeedHigh => (byte)((SelectedRpm >> 8) & 0xFF),
-            _ => Ram[value]
-        };
-        _status = Registers.StatusOutputFull;
-        return true;
-    }
-
-    private int SelectedRpm => Ram[Registers.FanSelect] == Registers.Fan2 ? Fan2 : Fan1;
 }

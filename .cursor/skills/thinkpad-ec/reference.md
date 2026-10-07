@@ -25,3 +25,7 @@ The execute buffer is a 32-byte function name followed by little-endian 64-bit i
 - `ioctl_pio_write`: two inputs, the port and the byte. No output words.
 
 A live read on this laptop returned fan 1 at 2563 RPM, fan 2 at 2369 RPM, and `0x78` at 73°C.
+
+## Rebuild probe
+
+The rebuilt reader, with per-byte retry and partial snapshots, read all 14 registers on both of its elevated passes: fan 1 at 2561 then 2489 RPM, fan 2 at 2360 then 2284 RPM, `0x78` at 42–43°C, `0x7A` 41, `0x7C` 43, `0x7D` 39–40, `0x7E` 43, and `0x79`, `0x7B`, `0x7F`, `0xC0`–`0xC3` missing. Library wrote `0x00` at 43°C and the probe restored `0x80`. The window then ran for several minutes with steady RPM and no dropouts.

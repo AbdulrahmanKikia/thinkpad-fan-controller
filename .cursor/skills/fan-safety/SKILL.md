@@ -32,6 +32,9 @@ Library and Manual stay refused while any valid sensor is still at or above 80°
 - Steady BIOS mode does not keep writing. Lenovo Vantage is left alone.
 - Library never commands level 0 once any valid sensor is at or above 55°C. Manual may command a low level. The 80°C handoff takes that choice away.
 - Level commands `0`–`7` stay disabled until both fan RPM values have been read live in this session. `0x80` is the restore command and is not a level.
+- A held fan speed, shown from an earlier poll because the latest read failed, is display only. It never satisfies the both-fans gate and never counts as live.
+- A level is written when it changes and refreshed every 30 seconds while it is held. `0x80` is written once per transition. A write the controller does not accept is retried on the next poll and the sentence says so.
+- On hardware the app always starts in BIOS and takes over only when a mode is chosen in the window. `--mode` and `--sim-temp` act only with `--simulate`.
 - `--simulate` performs no port I/O. Prove the cases below on the simulator. Do not heat the laptop to 80°C to test the trip.
 
 ## Cases the simulator must pass

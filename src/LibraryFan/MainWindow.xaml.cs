@@ -1,63 +1,65 @@
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Interop;
-using Media = System.Windows.Media;
-using Shapes = System.Windows.Shapes;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Microsoft.Win32;
-using Forms = System.Windows.Forms;
+using Shapes = System.Windows.Shapes;
 
 namespace LibraryFan;
 
 public partial class MainWindow : Window
 {
-    private readonly FanController _controller;
+    private const int WarmCelsius = 65;
+    private const double TraceMinCelsius = 30;
+    private const double TraceMaxCelsius = 90;
+
     private readonly bool _simulate;
-    private readonly List<string> _log = new();
-    private FanUpdate? _latest;
-    private Forms.NotifyIcon? _tray;
+    private TrayIcon? _tray;
+
+    internal FanController Controller { get; }
+    internal FanUpdate? Latest { get; private set; }
 
     public MainWindow(IEcClient client, bool simulate, bool selfTest)
     {
         InitializeComponent();
         _simulate = simulate;
-        _controller = new FanController(client);
-        _controller.Updated += OnUpdated;
+        Controller = new FanController(client);
+        Controller.Updated += OnUpdated;
+
         SimPanel.Visibility = simulate ? Visibility.Visible : Visibility.Collapsed;
+        SimTempLabel.Text = $"{(int)SimTemp.Value}°";
         SimTemp.ValueChanged += (_, _) =>
         {
             SimTempLabel.Text = $"{(int)SimTemp.Value}°";
-            _controller.SetSimTemperature((int)SimTemp.Value);
+            Controller.SetSimTemperature((int)SimTemp.Value);
         };
-        SimTempLabel.Text = $"{(int)SimTemp.Value}°";
+
         BuildLevelButtons();
-        try
-        {
+        BuildCurveChips(Controller.Session.Curve);
+        if (!selfTest)
             BuildTray();
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-        }
-        SystemEvents.SessionEnding += (_, _) => _controller.RestoreBios();
-        SystemEvents.PowerModeChanged += (_, args) =>
-        {
-            if (args.Mode == PowerModes.Suspend)
-                _controller.RestoreBios();
-        };
+
+        SystemEvents.SessionEnding += OnSessionEnding;
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Closed += (_, _) =>
         {
+            SystemEvents.SessionEnding -= OnSessionEnding;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             _tray?.Dispose();
-            _controller.Dispose();
+            Controller.Dispose();
         };
-        if (!selfTest && !simulate && client is UnavailableEc)
-            ShowElevateHint(client.Status);
         TraceCanvas.SizeChanged += (_, _) =>
         {
-            if (_latest is not null)
-                PaintTrace(_latest.Trace);
+            if (Latest is not null)
+                PaintTrace(Latest.Trace);
         };
+
+        if (!selfTest && !simulate && client is UnavailableEc)
+            ShowElevateHint(client.Status);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -65,7 +67,8 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         var hwnd = new WindowInteropHelper(this).Handle;
         var dark = 1;
-        DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int));
+        DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
+
         var area = SystemParameters.WorkArea;
         if (Width > area.Width - 24)
             Width = Math.Max(MinWidth, area.Width - 24);
@@ -75,72 +78,40 @@ public partial class MainWindow : Window
         Top = area.Top + Math.Max(0, (area.Height - Height) / 2);
     }
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-
-    public async Task<bool> RunSelfTestAsync()
+    internal async Task<bool> WaitForUpdateAsync(TimeSpan timeout)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (_latest is null && DateTime.UtcNow < deadline)
+        var deadline = DateTime.UtcNow + timeout;
+        while (Latest is null && DateTime.UtcNow < deadline)
         {
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
-            if (_latest is null)
+            if (Latest is null)
                 await Task.Delay(30);
         }
 
-        if (_latest is null)
-            return Fail("The window never received a fan update.");
-
-        Click(LibraryButton);
-        SetTemperature(64);
-        if (!AwaitReason("Library is holding level 2 because 0x78 is 64°C."))
-            return Fail($"Library at 64°C said '{_latest?.Reason}'.");
-
-        SetTemperature(80);
-        if (!AwaitReason("Handed control back to the machine because a sensor reached 80°C."))
-            return Fail($"Library handoff said '{_latest?.Reason}'.");
-
-        Click(LibraryButton);
-        if (_latest?.Reason != "Handed control back to the machine because a sensor reached 80°C.")
-            return Fail("Library resumed while the sensor was still at 80°C.");
-        if (!(_latest?.Refusal?.Contains("stays in control", StringComparison.Ordinal) ?? false))
-            return Fail("The refused handoff did not explain itself.");
-
-        SetTemperature(60);
-        Click(LibraryButton);
-        if (!(_latest?.Reason.Contains("Library is holding level", StringComparison.Ordinal) ?? false))
-            return Fail($"Library did not resume after cooling: '{_latest?.Reason}'.");
-
-        Click(LevelButton(1));
-        if (_latest?.Reason != "Manual is holding level 1.")
-            return Fail($"Manual said '{_latest?.Reason}'.");
-
-        SetTemperature(80);
-        if (!AwaitReason("Handed control back to the machine because a sensor reached 80°C."))
-            return Fail($"Manual handoff said '{_latest?.Reason}'.");
-
-        SetTemperature(50);
-        Click(BiosButton);
-        if (_latest?.Reason != "BIOS is in control.")
-            return Fail($"BIOS said '{_latest?.Reason}'.");
-
-        _log.Add("self-test passed");
-        try
-        {
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "self-test.log"), string.Join(Environment.NewLine, _log));
-        }
-        catch (IOException)
-        {
-        }
-
-        return true;
+        return Latest is not null;
     }
 
-    private void BiosClick(object sender, RoutedEventArgs e) => _controller.Request(ControlMode.Bios);
+    internal Button LevelButton(int level) => (Button)LevelHost.Children[level];
 
-    private void LibraryClick(object sender, RoutedEventArgs e) => _controller.Request(ControlMode.Library);
+    internal void SetSimTemperature(int celsius) => SimTemp.Value = celsius;
 
-    private void ManualClick(object sender, RoutedEventArgs e) => _controller.Request(ControlMode.Manual, _latest?.ManualLevel ?? 1);
+    internal void ShowFailure(string message) => ReasonText.Text = message;
+
+    internal static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+    private void BiosClick(object sender, RoutedEventArgs e) => Controller.Request(ControlMode.Bios);
+
+    private void LibraryClick(object sender, RoutedEventArgs e) => Controller.Request(ControlMode.Library);
+
+    private void ManualClick(object sender, RoutedEventArgs e) => Controller.Request(ControlMode.Manual, Latest?.ManualLevel ?? 1);
+
+    private void OnSessionEnding(object? sender, SessionEndingEventArgs e) => Controller.RestoreBios();
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Suspend)
+            Controller.RestoreBios();
+    }
 
     private void OnUpdated(FanUpdate update)
     {
@@ -150,44 +121,90 @@ public partial class MainWindow : Window
             return;
         }
 
-        _latest = update;
+        Latest = update;
         ReasonText.Text = update.Reason;
         RefusalText.Text = update.Refusal ?? "";
         RefusalText.Visibility = string.IsNullOrEmpty(update.Refusal) ? Visibility.Collapsed : Visibility.Visible;
         StatusText.Text = update.DriverStatus;
-        Fan1.Show(update.Fan1Rpm, "Fan 1", update.CommandLabel);
-        Fan2.Show(update.Fan2Rpm, "Fan 2", update.CommandLabel);
-        var accent = update.IsLatched
-            ? (Media.Brush)FindResource("Coral")
-            : update.Mode == ControlMode.Bios || (update.Fan1Rpm ?? 0) < 1600
-                ? (Media.Brush)FindResource("Teal")
-                : (Media.Brush)FindResource("Amber");
+        HealthText.Text = update.Health;
+
+        Fan1.Show(update.Fan1Rpm, update.Fan1Held, "Fan 1", update.CommandLabel);
+        Fan2.Show(update.Fan2Rpm, update.Fan2Held, "Fan 2", update.CommandLabel);
+        var hottest = update.Sensors.Where(sensor => sensor.IsValid).Max(sensor => sensor.Celsius);
+        var accent = Brush(update.IsLatched ? "Coral" : hottest is null ? "Teal" : HeatKey(hottest));
         Fan1.SetAccent(accent);
         Fan2.SetAccent(accent);
+
+        PaintLink(update);
         PaintMode(update);
         PaintSensors(update.Sensors);
         PaintTrace(update.Trace);
-        if (_tray is not null)
-            _tray.Text = TrimTooltip(update.Reason);
+        _tray?.SetText(update.Reason);
+    }
+
+    /// <summary>Teal below 65°C, amber from 65°C, coral at the 80°C handoff. Shared by the gauges and the sensor bars.</summary>
+    private static string HeatKey(int? celsius) =>
+        celsius is null ? "Line"
+        : celsius >= FanSession.DangerCelsius ? "Coral"
+        : celsius >= WarmCelsius ? "Amber"
+        : "Teal";
+
+    private void PaintLink(FanUpdate update)
+    {
+        var (text, key, beat) =
+            !update.DriverOpen ? ("OFFLINE", "Muted", false)
+            : update.MissedPolls > 0 ? ("NO ANSWER", "Coral", false)
+            : update.RegistersRead < update.RegistersTotal ? ("PARTIAL", "Amber", true)
+            : ("LIVE", "Teal", true);
+        LinkText.Text = text;
+        LinkText.Foreground = Brush(key);
+        LinkDot.Background = Brush(key);
+        LinkDot.BeginAnimation(OpacityProperty, null);
+        LinkDot.Opacity = 1;
+        if (beat)
+        {
+            LinkDot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.3, FanController.PollInterval - TimeSpan.FromMilliseconds(100))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            });
+        }
     }
 
     private void PaintMode(FanUpdate update)
     {
-        var label = update.IsLatched ? "HANDED BACK" : update.Mode switch
+        ModeBadgeText.Text = update.IsLatched ? "HANDED BACK" : update.Mode switch
         {
             ControlMode.Library => "LIBRARY",
             ControlMode.Manual => "MANUAL",
             _ => "BIOS"
         };
-        ModePillText.Text = label;
-        var hot = update.IsLatched;
-        ModePill.Background = hot ? (Media.Brush)FindResource("Coral") : (Media.Brush)FindResource("Teal");
-        ModePillText.Foreground = hot ? Media.Brushes.White : (Media.Brush)FindResource("OnAccent");
+        ModeBadge.Background = update.IsLatched ? Brush("Coral") : Brush("Teal");
+        ModeBadgeText.Foreground = update.IsLatched ? Brushes.White : Brush("OnAccent");
+
         Mark(BiosButton, update.Mode == ControlMode.Bios && !update.IsLatched);
         Mark(LibraryButton, update.Mode == ControlMode.Library);
         Mark(ManualButton, update.Mode == ControlMode.Manual);
-        for (var level = 0; level <= 7; level++)
+        for (var level = 0; level <= Registers.MaxLevel; level++)
             Mark(LevelButton(level), update.Mode == ControlMode.Manual && update.ManualLevel == level);
+        RegisterLabel.Text = $"REGISTER 0x2F · {update.CommandLabel.ToUpperInvariant()}";
+
+        // While a sensor is still at 80°C the session refuses to take over; the buttons stay
+        // clickable so the refusal sentence can be shown, but they stop looking available.
+        var available = update.CanTakeControl ? 1.0 : 0.5;
+        LibraryButton.Opacity = available;
+        ManualButton.Opacity = available;
+        LevelHost.Opacity = available;
+
+        var held = update.Mode == ControlMode.Library ? update.CommandedLevel : null;
+        foreach (var child in CurveHost.Children)
+        {
+            if (child is Border chip && chip.Child is TextBlock text)
+            {
+                var active = held is not null && (int)chip.Tag == held;
+                chip.BorderBrush = Brush(active ? "Teal" : "Line");
+                text.Foreground = Brush(active ? "Ink" : "Muted");
+            }
+        }
     }
 
     private void PaintSensors(SensorSample[] sensors)
@@ -196,41 +213,62 @@ public partial class MainWindow : Window
         var hottest = sensors.Where(sensor => sensor.IsValid).MaxBy(sensor => sensor.Celsius);
         foreach (var sensor in sensors)
         {
-            var danger = sensor.IsValid && sensor.Celsius >= FanSession.DangerCelsius;
-            var chip = new Border
+            var tile = new Border
             {
                 Style = (Style)FindResource("Surface"),
-                Background = (Media.Brush)FindResource("Raised"),
+                Background = Brush("Raised"),
                 Padding = new Thickness(12, 8, 12, 8),
                 Margin = new Thickness(4),
                 MinHeight = 56
             };
-            if (danger)
-                chip.BorderBrush = (Media.Brush)FindResource("Coral");
+            if (sensor.IsValid && sensor.Celsius >= FanSession.DangerCelsius)
+                tile.BorderBrush = Brush("Coral");
             else if (hottest is not null && sensor.Address == hottest.Address)
-                chip.BorderBrush = (Media.Brush)FindResource("Teal");
+                tile.BorderBrush = Brush("Teal");
 
+            var value = sensor.IsValid ? $"{sensor.Celsius}°" : sensor.WasRead ? "—" : "…";
             var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             stack.Children.Add(new TextBlock
             {
                 Text = sensor.Label,
-                Foreground = (Media.Brush)FindResource("Muted"),
+                Foreground = Brush("Muted"),
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold
             });
             stack.Children.Add(new TextBlock
             {
-                Text = sensor.IsValid ? $"{sensor.Celsius}°" : "—",
-                Foreground = (Media.Brush)FindResource("Ink"),
+                Text = value,
+                Foreground = sensor.IsValid ? Brush("Ink") : Brush("Muted"),
                 FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
                 Margin = new Thickness(0, 2, 0, 0)
             });
-            chip.Child = stack;
-            SensorHost.Children.Add(chip);
+            stack.Children.Add(HeatBar(sensor.Celsius));
+            tile.Child = stack;
+            SensorHost.Children.Add(tile);
         }
     }
 
+    /// <summary>A 4px bar from 30°C to 90°C under each reading. Missing and unread bytes show the empty track.</summary>
+    private Grid HeatBar(int? celsius)
+    {
+        var share = celsius is int value ? Math.Clamp((value - TraceMinCelsius) / (TraceMaxCelsius - TraceMinCelsius), 0, 1) : 0;
+        var bar = new Grid { Height = 4, Margin = new Thickness(0, 8, 0, 0) };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(share, 0.001), GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(1 - share, 0.001), GridUnitType.Star) });
+        var track = new Border { Background = Brush("Line"), CornerRadius = new CornerRadius(2) };
+        Grid.SetColumnSpan(track, 2);
+        bar.Children.Add(track);
+        if (share > 0)
+            bar.Children.Add(new Border { Background = Brush(HeatKey(celsius)), CornerRadius = new CornerRadius(2) });
+        return bar;
+    }
+
+    /// <summary>
+    /// Fixed scales so the picture means the same thing every minute: 30–90°C on the left,
+    /// 0–6000 RPM on the right, one grid for both, a dashed line at the 80°C handoff, and the
+    /// newest sample marked at the right edge.
+    /// </summary>
     private void PaintTrace(IReadOnlyList<TraceSample> trace)
     {
         TraceCanvas.Children.Clear();
@@ -239,93 +277,166 @@ public partial class MainWindow : Window
             return;
         var width = TraceCanvas.ActualWidth;
         var height = TraceCanvas.ActualHeight;
-        if (width < 20 || height < 20)
+        if (width < 120 || height < 60)
             return;
 
-        var grid = (Media.Brush)FindResource("Line");
-        for (var band = 1; band <= 3; band++)
+        var plot = new Rect(30, 6, width - 30 - 32, height - 6 - 18);
+        double YForCelsius(double celsius) =>
+            plot.Bottom - (Math.Clamp((celsius - TraceMinCelsius) / (TraceMaxCelsius - TraceMinCelsius), 0, 1) * plot.Height);
+        double YForRpm(double rpm) => plot.Bottom - (Math.Clamp(rpm / FanRing.GaugeMaxRpm, 0, 1) * plot.Height);
+
+        for (var band = 0; band <= 3; band++)
         {
-            var y = height * band / 4;
+            var celsius = TraceMinCelsius + (band * 20);
+            var y = Math.Round(YForCelsius(celsius)) + 0.5;
             TraceCanvas.Children.Add(new Shapes.Line
             {
-                X1 = 0,
-                X2 = width,
-                Y1 = y,
-                Y2 = y,
-                Stroke = grid,
-                StrokeThickness = 1,
-                Opacity = 0.85
+                X1 = plot.Left, X2 = plot.Right, Y1 = y, Y2 = y,
+                Stroke = Brush("Line"), StrokeThickness = 1
             });
+            AxisLabel($"{celsius}°", plot.Left - 6, y, right: true, "Muted");
+            AxisLabel(band == 0 ? "0" : $"{band * 2}k", plot.Right + 6, y, right: false, "Muted");
         }
 
-        var maxRpm = Math.Max(1000, trace.Max(sample => sample.Rpm));
-        var maxCelsius = Math.Max(80, trace.Max(sample => sample.Celsius));
-        TraceCanvas.Children.Add(Line(trace, width, height, sample => sample.Celsius / maxCelsius, (Media.Brush)FindResource("Teal")));
-        TraceCanvas.Children.Add(Line(trace, width, height, sample => sample.Rpm / maxRpm, (Media.Brush)FindResource("Amber")));
+        var danger = Math.Round(YForCelsius(FanSession.DangerCelsius)) + 0.5;
+        TraceCanvas.Children.Add(new Shapes.Line
+        {
+            X1 = plot.Left, X2 = plot.Right, Y1 = danger, Y2 = danger,
+            Stroke = Brush("Coral"), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 3, 3 }, Opacity = 0.8
+        });
+        AxisLabel($"{FanSession.DangerCelsius}°", plot.Left - 6, danger, right: true, "Coral");
+
+        string[] marks = { "−3 min", "−2", "−1", "now" };
+        for (var i = 0; i < marks.Length; i++)
+        {
+            var x = Math.Round(plot.Left + (plot.Width * i / 3)) + 0.5;
+            TraceCanvas.Children.Add(new Shapes.Line
+            {
+                X1 = x, X2 = x, Y1 = plot.Bottom, Y2 = plot.Bottom + 4,
+                Stroke = Brush("Line"), StrokeThickness = 1
+            });
+            var label = new TextBlock { Text = marks[i], Foreground = Brush("Muted"), FontSize = 10, FontWeight = FontWeights.SemiBold };
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var left = i == 0 ? x : i == marks.Length - 1 ? x - label.DesiredSize.Width : x - (label.DesiredSize.Width / 2);
+            Canvas.SetLeft(label, left);
+            Canvas.SetTop(label, plot.Bottom + 5);
+            TraceCanvas.Children.Add(label);
+        }
+
+        var temperature = Polyline(trace, plot, sample => YForCelsius(sample.Celsius), Brush("Teal"));
+        var speed = Polyline(trace, plot, sample => YForRpm(sample.Rpm), Brush("Amber"));
+        TraceCanvas.Children.Add(speed);
+        TraceCanvas.Children.Add(temperature);
+        EndDot(speed.Points[^1], "Amber");
+        EndDot(temperature.Points[^1], "Teal");
     }
 
-    private static Shapes.Polyline Line(IReadOnlyList<TraceSample> trace, double width, double height, Func<TraceSample, double> pick, Media.Brush stroke)
+    private void AxisLabel(string text, double x, double y, bool right, string key)
+    {
+        var label = new TextBlock { Text = text, Foreground = Brush(key), FontSize = 10, FontWeight = FontWeights.SemiBold };
+        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Canvas.SetLeft(label, right ? x - label.DesiredSize.Width : x);
+        Canvas.SetTop(label, y - (label.DesiredSize.Height / 2));
+        TraceCanvas.Children.Add(label);
+    }
+
+    private void EndDot(Point point, string key)
+    {
+        var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Brush(key) };
+        Canvas.SetLeft(dot, point.X - 4);
+        Canvas.SetTop(dot, point.Y - 4);
+        TraceCanvas.Children.Add(dot);
+    }
+
+    private static Shapes.Polyline Polyline(IReadOnlyList<TraceSample> trace, Rect plot, Func<TraceSample, double> y, System.Windows.Media.Brush stroke)
     {
         var line = new Shapes.Polyline
         {
             Stroke = stroke,
             StrokeThickness = 2,
-            StrokeLineJoin = Media.PenLineJoin.Round,
-            StrokeStartLineCap = Media.PenLineCap.Round,
-            StrokeEndLineCap = Media.PenLineCap.Round
+            StrokeLineJoin = PenLineJoin.Round,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round
         };
-        var step = width / Math.Max(1, trace.Count - 1);
+        var step = plot.Width / Math.Max(1, FanController.TraceLength - 1);
+        var offset = plot.Right - (step * (trace.Count - 1));
         for (var i = 0; i < trace.Count; i++)
-        {
-            var y = height - 8 - (pick(trace[i]) * (height - 16));
-            line.Points.Add(new System.Windows.Point(i * step, y));
-        }
-
+            line.Points.Add(new Point(offset + (i * step), y(trace[i])));
         return line;
     }
 
     private void BuildLevelButtons()
     {
-        for (var level = 0; level <= 7; level++)
+        for (var level = 0; level <= Registers.MaxLevel; level++)
         {
             var captured = level;
-            var button = new System.Windows.Controls.Button
+            var button = new Button
             {
                 Content = level.ToString(),
                 Width = 40,
                 Margin = new Thickness(level == 0 ? 0 : 8, 0, 0, 0),
-                Style = (Style)FindResource("ModeButton"),
-                Padding = new Thickness(0)
+                Padding = new Thickness(0),
+                Style = (Style)FindResource("ModeButton")
             };
-            button.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty, $"ManualLevel{level}");
-            button.Click += (_, _) => _controller.Request(ControlMode.Manual, captured);
+            AutomationProperties.SetAutomationId(button, $"ManualLevel{level}");
+            button.Click += (_, _) => Controller.Request(ControlMode.Manual, captured);
             LevelHost.Children.Add(button);
         }
     }
 
-    private System.Windows.Controls.Button LevelButton(int level) => (System.Windows.Controls.Button)LevelHost.Children[level];
+    private void BuildCurveChips(LibraryCurve curve)
+    {
+        CurveHost.Children.Clear();
+        CurveHost.Children.Add(CurveChip(0, $"off below {curve.OffBelowCelsius}°", first: true));
+        foreach (var step in curve.Steps.OrderBy(step => step.Celsius))
+            CurveHost.Children.Add(CurveChip(step.Level, $"{step.Celsius}° → {step.Level}", first: false));
+        CurveNote.Text = $"Steps down {curve.HysteresisCelsius}° below each threshold. Level 0 is never held at or above {curve.OffBelowCelsius}°.";
+    }
+
+    private Border CurveChip(int level, string text, bool first) => new()
+    {
+        Style = (Style)FindResource("Surface"),
+        Background = Brush("Raised"),
+        Height = 28,
+        Padding = new Thickness(12, 0, 12, 0),
+        Margin = new Thickness(first ? 0 : 6, 0, 0, 0),
+        Tag = level,
+        Child = new TextBlock
+        {
+            Text = text,
+            Foreground = Brush("Muted"),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
+        }
+    };
 
     private void BuildTray()
     {
-        _tray = new Forms.NotifyIcon
+        try
         {
-            Icon = System.Drawing.SystemIcons.Application,
-            Visible = true,
-            Text = "Library Fan"
+            _tray = new TrayIcon();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return;
+        }
+
+        _tray.ShowRequested += () =>
+        {
+            Show();
+            WindowState = WindowState.Normal;
+            Activate();
         };
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Show", null, (_, _) => { Show(); WindowState = WindowState.Normal; Activate(); });
-        menu.Items.Add("BIOS", null, (_, _) => _controller.Request(ControlMode.Bios));
-        menu.Items.Add("Library", null, (_, _) => _controller.Request(ControlMode.Library));
-        menu.Items.Add("Exit", null, (_, _) => Close());
-        _tray.ContextMenuStrip = menu;
-        _tray.DoubleClick += (_, _) => { Show(); WindowState = WindowState.Normal; Activate(); };
+        _tray.BiosRequested += () => Controller.Request(ControlMode.Bios);
+        _tray.LibraryRequested += () => Controller.Request(ControlMode.Library);
+        _tray.ExitRequested += Close;
     }
 
     private void ShowElevateHint(string status)
     {
         StatusText.Text = status;
-        var restart = new System.Windows.Controls.Button
+        var restart = new Button
         {
             Content = "Restart as administrator",
             Margin = new Thickness(0, 8, 0, 0),
@@ -336,34 +447,17 @@ public partial class MainWindow : Window
         StatusHost.Children.Add(restart);
     }
 
-    private void Mark(System.Windows.Controls.Button button, bool active)
+    private void Mark(Button button, bool active)
     {
-        button.Background = (Media.Brush)FindResource(active ? "Teal" : "Raised");
-        button.Foreground = (Media.Brush)FindResource(active ? "OnAccent" : "Ink");
-        button.BorderBrush = (Media.Brush)FindResource(active ? "Teal" : "Line");
+        button.Background = Brush(active ? "Teal" : "Raised");
+        button.Foreground = Brush(active ? "OnAccent" : "Ink");
+        button.BorderBrush = Brush(active ? "Teal" : "Line");
     }
 
-    private static void Click(System.Windows.Controls.Button button) => button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+    private System.Windows.Media.Brush Brush(string key) => (System.Windows.Media.Brush)FindResource(key);
 
-    private void SetTemperature(int celsius) => SimTemp.Value = celsius;
+    private const int DwmUseImmersiveDarkMode = 20;
 
-    private bool AwaitReason(string expected) => _latest?.Reason == expected;
-
-    private bool Fail(string message)
-    {
-        _log.Add(message);
-        try
-        {
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "self-test.log"), string.Join(Environment.NewLine, _log));
-        }
-        catch (IOException)
-        {
-        }
-
-        ReasonText.Text = message;
-        return false;
-    }
-
-    private static string TrimTooltip(string reason) =>
-        reason.Length <= 63 ? reason : reason[..60] + "...";
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }

@@ -1,10 +1,24 @@
-using Media = System.Windows.Media;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace LibraryFan;
 
-public partial class FanRing : System.Windows.Controls.UserControl
+/// <summary>
+/// An instrument arc for one fan. The arc fills with measured RPM on a fixed 0–6000 scale and the
+/// rotor inside turns at the measured speed. Zero is stopped. A held value is marked, not hidden.
+/// </summary>
+public partial class FanRing : UserControl
 {
+    public const int GaugeMaxRpm = 6000;
+
+    private const double DegreesPerRpmSecond = 0.45;
+    private const double Center = 86;
+    private const double Radius = 74;
+    private const double StartAngle = -135;
+    private const double Sweep = 270;
+
     private readonly DispatcherTimer _timer;
     private int _rpm;
     private DateTime _last = DateTime.UtcNow;
@@ -12,42 +26,78 @@ public partial class FanRing : System.Windows.Controls.UserControl
     public FanRing()
     {
         InitializeComponent();
-        Marker.Stroke = (Media.Brush)FindResource("Teal");
+        Track.Data = Arc(StartAngle, Sweep);
+        SetAccent((Brush)FindResource("Teal"));
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(32) };
         _timer.Tick += Advance;
         _timer.Start();
-        Show(null, "Fan", "Firmware");
+        Show(null, false, "Fan", "Firmware");
     }
 
-    public void Show(int? rpm, string caption, string command)
+    public void Show(int? rpm, bool held, string caption, string command)
     {
         _rpm = rpm ?? 0;
         CaptionText.Text = caption;
-        CommandTextBlock.Text = command;
+        CommandText.Text = command;
+
         if (rpm is null)
         {
             RpmText.Text = "—";
-            RpmText.Foreground = (Media.Brush)FindResource("Muted");
+            RpmText.Foreground = (Brush)FindResource("Muted");
             UnitText.Text = "NO READING";
-            Marker.Opacity = 0.2;
+            Fill.Data = Geometry.Empty;
+            Rotor.Opacity = 0.18;
             return;
         }
 
-        RpmText.Foreground = (Media.Brush)FindResource("Ink");
+        RpmText.Foreground = (Brush)FindResource("Ink");
+        var share = Math.Clamp(rpm.Value / (double)GaugeMaxRpm, 0, 1);
+        Fill.Data = Arc(StartAngle, Sweep * share);
+        Fill.Opacity = held ? 0.55 : 1;
+
         if (rpm == 0)
         {
             RpmText.Text = "0";
             UnitText.Text = "STOPPED";
-            Marker.Opacity = 0.28;
+            Rotor.Opacity = 0.28;
             return;
         }
 
         RpmText.Text = rpm.Value.ToString();
-        UnitText.Text = "RPM";
-        Marker.Opacity = 1;
+        UnitText.Text = held ? "LAST READ" : "RPM";
+        Rotor.Opacity = held ? 0.4 : 0.75;
     }
 
-    public void SetAccent(Media.Brush brush) => Marker.Stroke = brush;
+    public void SetAccent(Brush brush)
+    {
+        Fill.Stroke = brush;
+        Rotor.Stroke = brush;
+    }
+
+    private static Geometry Arc(double startDegrees, double sweepDegrees)
+    {
+        if (sweepDegrees < 0.5)
+            return Geometry.Empty;
+        var figure = new PathFigure { StartPoint = PointAt(startDegrees), IsClosed = false };
+        figure.Segments.Add(new ArcSegment(
+            PointAt(startDegrees + sweepDegrees),
+            new Size(Radius, Radius),
+            0,
+            sweepDegrees > 180,
+            SweepDirection.Clockwise,
+            true));
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        geometry.Freeze();
+        return geometry;
+    }
+
+    /// <summary>Angles are clockwise from twelve o'clock, so −135° is bottom-left and +135° is bottom-right.</summary>
+    private static Point PointAt(double degrees)
+    {
+        var radians = degrees * Math.PI / 180;
+        return new Point(Center + (Radius * Math.Sin(radians)), Center - (Radius * Math.Cos(radians)));
+    }
 
     private void Advance(object? sender, EventArgs e)
     {
@@ -56,6 +106,6 @@ public partial class FanRing : System.Windows.Controls.UserControl
         _last = now;
         if (_rpm <= 0)
             return;
-        Spin.Angle = (Spin.Angle + (_rpm * 0.45 * seconds)) % 360;
+        Spin.Angle = (Spin.Angle + (_rpm * DegreesPerRpmSecond * seconds)) % 360;
     }
 }

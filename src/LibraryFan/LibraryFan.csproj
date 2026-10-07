@@ -6,12 +6,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- No apphost: Smart App Control blocks an unsigned LibraryFan.exe. The signed dotnet.exe hosts LibraryFan.dll instead. -->
+    <UseAppHost>false</UseAppHost>
     <RootNamespace>LibraryFan</RootNamespace>
     <AssemblyName>LibraryFan</AssemblyName>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Windows Forms is only used for the tray icon. Keep its types out of the WPF files. -->
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibraryFan.Core\LibraryFan.Core.csproj" />
     <None Include="..\LibraryFan.Core\library-curve.json" Link="library-curve.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\third_party\pawnio\LpcACPIEC.bin" Link="LpcACPIEC.bin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LibraryFan.UiTests" />
   </ItemGroup>
 </Project>

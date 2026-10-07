@@ -2,6 +2,13 @@ using System.Text.Json;
 
 namespace LibraryFan;
 
+public sealed record CurveStep(int Celsius, int Level);
+
+/// <summary>
+/// The quiet curve. Fans off only below <see cref="OffBelowCelsius"/>, then fixed steps.
+/// A level steps down only after the temperature falls <see cref="HysteresisCelsius"/>
+/// below the point that engaged it. The 80°C ceiling lives in <see cref="FanSession"/>, not here.
+/// </summary>
 public sealed class LibraryCurve
 {
     public int OffBelowCelsius { get; init; } = 55;
@@ -48,18 +55,18 @@ public sealed class LibraryCurve
         return level;
     }
 
-    public int EngageCelsius(int level)
-    {
-        var match = Steps.FirstOrDefault(step => step.Level == level);
-        return match?.Celsius ?? OffBelowCelsius;
-    }
+    public int EngageCelsius(int level) =>
+        Steps.FirstOrDefault(step => step.Level == level)?.Celsius ?? OffBelowCelsius;
+
+    public static string DefaultPath() =>
+        Path.Combine(AppContext.BaseDirectory, "library-curve.json");
 
     public static LibraryCurve Load(string path)
     {
         if (!File.Exists(path))
             return new LibraryCurve();
 
-        var file = JsonSerializer.Deserialize<CurveFile>(File.ReadAllText(path));
+        var file = JsonSerializer.Deserialize<CurveFile>(File.ReadAllText(path), JsonOptions);
         if (file?.Steps is null || file.Steps.Length == 0)
             return new LibraryCurve();
 
@@ -67,12 +74,14 @@ public sealed class LibraryCurve
         {
             OffBelowCelsius = file.OffBelowCelsius,
             HysteresisCelsius = file.HysteresisCelsius,
-            Steps = file.Steps.Select(step => new CurveStep(step.Celsius, step.Level)).ToArray()
+            Steps = file.Steps
+                .Where(step => step.Level is >= 1 and <= Registers.MaxLevel)
+                .Select(step => new CurveStep(step.Celsius, step.Level))
+                .ToArray()
         };
     }
 
-    public static string DefaultPath() =>
-        Path.Combine(AppContext.BaseDirectory, "library-curve.json");
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private sealed class CurveFile
     {
@@ -87,5 +96,3 @@ public sealed class LibraryCurve
         public int Level { get; set; }
     }
 }
-
-public sealed record CurveStep(int Celsius, int Level);

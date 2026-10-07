@@ -3,28 +3,41 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="Transparent">
   <Border Style="{StaticResource Surface}" Padding="12,14">
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-      <Grid Width="148" Height="148" HorizontalAlignment="Center">
-        <Ellipse Stroke="{StaticResource Line}" StrokeThickness="10"/>
-        <Ellipse x:Name="Marker" StrokeThickness="10" StrokeDashArray="1.2 16"
-                 StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+    <!-- The gauge and its captions shrink together when the window is short; they never upscale. -->
+    <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Center" VerticalAlignment="Center">
+    <StackPanel>
+      <Grid Width="172" Height="172" HorizontalAlignment="Center">
+        <!-- 270° instrument arc: track, then the measured share of the 0–6000 RPM scale. -->
+        <Path x:Name="Track" Stroke="{StaticResource Line}" StrokeThickness="10"
+              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+        <Path x:Name="Fill" StrokeThickness="10"
+              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+        <!-- Rotor: a thin dotted ring whose rotation follows measured RPM. -->
+        <Ellipse x:Name="Rotor" Width="120" Height="120" StrokeThickness="4" StrokeDashArray="0.01 4.5453"
+                 StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeDashCap="Round"
                  RenderTransformOrigin="0.5,0.5">
           <Ellipse.RenderTransform>
             <RotateTransform x:Name="Spin"/>
           </Ellipse.RenderTransform>
         </Ellipse>
-        <Ellipse Width="100" Height="100" Fill="#10151C"/>
+        <Ellipse Width="100" Height="100" Fill="{StaticResource Well}"/>
         <StackPanel VerticalAlignment="Center">
-          <TextBlock x:Name="RpmText" Foreground="{StaticResource Ink}" FontSize="32"
+          <TextBlock x:Name="RpmText" Foreground="{StaticResource Ink}" FontSize="34"
                      FontWeight="SemiBold" HorizontalAlignment="Center"/>
           <TextBlock x:Name="UnitText" Text="RPM" Foreground="{StaticResource Muted}"
                      FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,2,0,0"/>
         </StackPanel>
+        <!-- Scale ends sit in the open gap at the bottom of the arc. -->
+        <TextBlock Text="0" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold"
+                   HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="31,0,0,14"/>
+        <TextBlock Text="6k" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold"
+                   HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,28,14"/>
       </Grid>
       <TextBlock x:Name="CaptionText" Foreground="{StaticResource Ink}" FontSize="15"
-                 FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,0"/>
-      <TextBlock x:Name="CommandTextBlock" Foreground="{StaticResource Muted}" FontSize="12"
+                 FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+      <TextBlock x:Name="CommandText" Foreground="{StaticResource Muted}" FontSize="12"
                  FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/>
     </StackPanel>
+    </Viewbox>
   </Border>
 </UserControl>

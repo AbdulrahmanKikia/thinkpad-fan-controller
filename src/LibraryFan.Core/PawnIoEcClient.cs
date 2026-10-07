@@ -4,14 +4,25 @@ using Microsoft.Win32.SafeHandles;
 
 namespace LibraryFan;
 
+/// <summary>
+/// Port access through the signed PawnIO driver and its LpcACPIEC module, which only allows
+/// ports 0x62 and 0x66. The calls below are the ones that succeeded on this machine; see
+/// .cursor/skills/thinkpad-ec/reference.md.
+/// </summary>
 public sealed class PawnIoEcClient : IEcClient
 {
+    public const string DevicePath = @"\\?\GLOBALROOT\Device\PawnIO";
+    public const string ModuleFile = "LpcACPIEC.bin";
+    public const string BusMutex = @"Global\Access_EC";
+
     private const uint GenericReadWrite = 0xC0000000;
+    private const uint ShareReadWrite = 3;
     private const uint OpenExisting = 3;
-    private const int FunctionNameLength = 32;
+    private static readonly TimeSpan BusWait = TimeSpan.FromSeconds(2);
+
     private readonly SafeHandle? _device;
-    private readonly Mutex _bus = new(false, @"Global\Access_EC");
     private readonly PawnPort? _ports;
+    private readonly Mutex _bus = new(false, BusMutex);
 
     private PawnIoEcClient(SafeHandle? device, string status)
     {
@@ -19,30 +30,25 @@ public sealed class PawnIoEcClient : IEcClient
         Status = status;
         if (device is not null)
             _ports = new PawnPort(device);
-        IsOpen = device is not null;
     }
 
-    public bool IsOpen { get; }
+    public bool IsOpen => _ports is not null;
     public string Status { get; }
 
     public static PawnIoEcClient Open()
     {
-        var modulePath = Path.Combine(AppContext.BaseDirectory, "LpcACPIEC.bin");
+        var modulePath = Path.Combine(AppContext.BaseDirectory, ModuleFile);
         if (!File.Exists(modulePath))
-        {
-            return new PawnIoEcClient(null,
-                "The PawnIO EC module is missing. Reinstall Library Fan so LpcACPIEC.bin sits next to the app.");
-        }
+            return new PawnIoEcClient(null, $"The PawnIO EC module is missing. Put {ModuleFile} next to LibraryFan.dll.");
 
-        var device = CreateFile(@"\\?\GLOBALROOT\Device\PawnIO", GenericReadWrite, 3, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+        var device = CreateFile(DevicePath, GenericReadWrite, ShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
         if (device.IsInvalid)
         {
             var error = Marshal.GetLastWin32Error();
             device.Dispose();
-            return new PawnIoEcClient(null,
-                error == 5
-                    ? "PawnIO refused this process. Start Library Fan as administrator."
-                    : "PawnIO is not installed. Install the signed driver from https://pawnio.eu, then start Library Fan as administrator.");
+            return new PawnIoEcClient(null, error == 5
+                ? "PawnIO refused this process. Start Library Fan as administrator."
+                : "PawnIO is not installed. Install the signed driver from https://pawnio.eu, then start Library Fan as administrator.");
         }
 
         var module = File.ReadAllBytes(modulePath);
@@ -50,17 +56,18 @@ public sealed class PawnIoEcClient : IEcClient
         {
             var error = Marshal.GetLastWin32Error();
             device.Dispose();
-            return new PawnIoEcClient(null, $"PawnIO could not load the EC module (Win32 {error}).");
+            return new PawnIoEcClient(null, $"PawnIO could not load the EC module (Win32 error {error}).");
         }
 
-        return new PawnIoEcClient(device, "PawnIO is reading the embedded controller. Fan levels stay with firmware until both fans have been read and you choose a mode.");
+        return new PawnIoEcClient(device,
+            "PawnIO is reading the embedded controller. Fan levels stay with firmware until both fans have been read and you choose a mode.");
     }
 
     public FanReading Read()
     {
-        if (_ports is null || !WithBus(() => ThinkPadEc.TryReadSnapshot(_ports, out var reading) ? reading : null, out var snapshot))
+        if (_ports is null)
             return FanReading.Unreadable;
-        return snapshot ?? FanReading.Unreadable;
+        return WithBus(() => ThinkPadEc.ReadSnapshot(_ports), out var reading) ? reading : FanReading.Unreadable;
     }
 
     public bool TryWrite(byte command)
@@ -81,7 +88,17 @@ public sealed class PawnIoEcClient : IEcClient
     private bool WithBus<T>(Func<T> action, out T value)
     {
         value = default!;
-        if (!_bus.WaitOne(2000))
+        bool taken;
+        try
+        {
+            taken = _bus.WaitOne(BusWait);
+        }
+        catch (AbandonedMutexException)
+        {
+            taken = true;
+        }
+
+        if (!taken)
             return false;
         try
         {
@@ -96,6 +113,7 @@ public sealed class PawnIoEcClient : IEcClient
 
     private sealed class PawnPort : IPortIo
     {
+        private const int FunctionNameLength = 32;
         private readonly SafeHandle _device;
 
         public PawnPort(SafeHandle device) => _device = device;
@@ -156,17 +174,4 @@ public sealed class PawnIoEcClient : IEcClient
         uint outSize,
         out uint bytesReturned,
         IntPtr overlapped);
-}
-
-public sealed class UnavailableEc : IEcClient
-{
-    public UnavailableEc(string status) => Status = status;
-
-    public bool IsOpen => false;
-    public string Status { get; }
-
-    public FanReading Read() => FanReading.Unreadable;
-    public bool TryWrite(byte command) => false;
-    public void RestoreBios() { }
-    public void Dispose() { }
 }
