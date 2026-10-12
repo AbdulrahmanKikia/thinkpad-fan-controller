@@ -39,7 +39,7 @@ The built-in map is the ThinkPad P1 Gen 3 `20TH000XUS`, BIOS containing `N2VET41
 - It does not survive Task Manager killing the process. The last level can remain in the controller until reboot or until something else writes `0x80`.
 - It does not ship `LibraryFan.exe`. Smart App Control on this PC blocks that unsigned host. The fan app is `LibraryFan.dll` under the signed `dotnet.exe`.
 - It does not install the PawnIO driver or the .NET runtime. The person running it installs both.
-- The setup program `LibraryFanSetup.exe` does not download anything until this repository is public and a release contains `LibraryFan-try.zip`. The repository is still private.
+- The setup program `LibraryFanSetup.exe` does not download anything until a release contains `LibraryFan-try.zip`. The source is public. There is no release yet.
 
 ## How it was built
 
@@ -100,11 +100,11 @@ What was added instead:
 
 Other people should not need this repository or an unsigned exe. `Package ThinkPad Fan Controller Utility.cmd` publishes a framework-dependent folder and `dist\LibraryFan-try.zip`: the DLL, `Open ThinkPad Fan Controller Utility.cmd`, `LpcACPIEC.bin`, `COPYING`, the example profile, and a short read-me. The person needs the .NET 8 Desktop Runtime and the PawnIO driver.
 
-`LibraryFanSetup.exe` is a separate program, the one executable, because an installer has to be something a person can download and run. It does not contain the fan app. It downloads `LibraryFan-try.zip` from the latest release of this GitHub repository and installs the DLL under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still calls `dotnet exec`. The download refuses a redirect off GitHub, refuses `LibraryFan.exe` inside the zip, and does not install a `hardware-profile.json`. The repository is private and has no release, so that URL returns 404 until it is public and a tagged release contains the zip. The setup exe is unsigned, so Smart App Control can block it on this PC too.
+`LibraryFanSetup.exe` is a separate program, the one executable, because an installer has to be something a person can download and run. It does not contain the fan app. It downloads `LibraryFan-try.zip` from the latest release of this GitHub repository and installs the DLL under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still calls `dotnet exec`. The download refuses a redirect off GitHub, refuses `LibraryFan.exe` inside the zip, and does not install a `hardware-profile.json`. The source is public. There is no release, so that URL returns 404 until a tagged release contains the zip. The setup exe is unsigned, so Smart App Control can block it on this PC too.
 
 ### 10. Publishing was deliberately left unfinished
 
-Git was installed during the work. The first commit attempt failed because no author identity was configured, and that configuration was left untouched. On 7 October the tree was committed with a one-shot author and pushed to a private repository. The owner plans to make the repository public when the project is finished. The application code is under the MIT License. The LGPL module already has its license and its source link. The 80°C path still has not been run on the hardware, on purpose.
+Git was installed during the work. The first commit attempt failed because no author identity was configured, and that configuration was left untouched. On 7 October the tree was committed with a one-shot author and pushed to a private repository. The source is now public under the MIT License, so other people can build it and add a machine they have measured. [CONTRIBUTING.md](CONTRIBUTING.md) states the limits. A tagged release, which is what the installer downloads, is still not cut. The application code is under the MIT License. The LGPL module already has its license and its source link. The 80°C path still has not been run on the hardware, on purpose.
 
 ## What is still open
 

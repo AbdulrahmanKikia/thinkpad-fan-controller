@@ -8,7 +8,7 @@ Read [DOCUMENTATION.md](DOCUMENTATION.md) for what it does, what it refuses, and
 
 ## Built on other people's work
 
-The register map is copied from [nikolasgd/TPFanControl-dual-fan](https://github.com/nikolasgd/TPFanControl-dual-fan) `fancontrol/fanstuff.cpp`. That project is a fork of [byrnes/TPFanControl](https://github.com/byrnes/TPFanControl) and points at the original [TPFanControl](https://sourceforge.net/projects/tp4xfancontrol/). Port access is the signed driver from [pawnio.eu](https://pawnio.eu). The vendored `LpcACPIEC.bin` is from [namazso/PawnIO.Modules](https://github.com/namazso/PawnIO.Modules) 0.2.11, LGPL-2.1, with `third_party/pawnio/COPYING` beside it. Those projects are the source of the protocol. This repository did not invent it. The application code is under the MIT License in [LICENSE](LICENSE). `third_party/pawnio` remains LGPL-2.1-or-later.
+The register map is copied from [nikolasgd/TPFanControl-dual-fan](https://github.com/nikolasgd/TPFanControl-dual-fan) `fancontrol/fanstuff.cpp`. That project is a fork of [byrnes/TPFanControl](https://github.com/byrnes/TPFanControl) and points at the original [TPFanControl](https://sourceforge.net/projects/tp4xfancontrol/). Port access is the signed driver from [pawnio.eu](https://pawnio.eu). The vendored `LpcACPIEC.bin` is from [namazso/PawnIO.Modules](https://github.com/namazso/PawnIO.Modules) 0.2.11, LGPL-2.1, with `third_party/pawnio/COPYING` beside it. Those projects are the source of the protocol. This repository did not invent it. The application code is under the MIT License in [LICENSE](LICENSE). `third_party/pawnio` remains LGPL-2.1-or-later. The source is public so other people can build it and extend a machine they have measured. [CONTRIBUTING.md](CONTRIBUTING.md) is how to do that without inventing a register map.
 
 ## Run
 
@@ -28,7 +28,18 @@ Package ThinkPad Fan Controller Utility.cmd
 
 That publishes into `dist\LibraryFan`, zips `dist\LibraryFan-try.zip`, and builds `dist\LibraryFanSetup.exe`. The folder contains `LibraryFan.dll`, `Open ThinkPad Fan Controller Utility.cmd`, `LpcACPIEC.bin`, the LGPL `COPYING` for that module, `hardware-profile.example.json`, and `Read this first.txt`. The person needs the .NET 8 Desktop Runtime and the PawnIO driver from [pawnio.eu](https://pawnio.eu). They do not need this repository.
 
-`LibraryFanSetup.exe` is the file to download. It fetches `LibraryFan-try.zip` from the latest release of [AbdulrahmanKikia/library-fan](https://github.com/AbdulrahmanKikia/library-fan) and installs the DLL folder under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still starts `dotnet exec LibraryFan.dll`. The repository is private and has no release yet, so that download returns 404 until a public release contains the zip. Smart App Control can block the unsigned setup exe on this PC.
+`LibraryFanSetup.exe` is the file to download. It fetches `LibraryFan-try.zip` from the latest release of [AbdulrahmanKikia/library-fan](https://github.com/AbdulrahmanKikia/library-fan) and installs the DLL folder under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still starts `dotnet exec LibraryFan.dll`. The source is public. There is no release yet, so that download returns 404 until a tagged release contains the zip. Smart App Control can block the unsigned setup exe on this PC.
+
+## Build from source
+
+Windows and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0):
+
+```bat
+dotnet test LibraryFan.sln
+dotnet build LibraryFan.sln -c Release
+```
+
+To add a machine, follow [CONTRIBUTING.md](CONTRIBUTING.md). A profile is used only when its product matches the computer that is running.
 
 ```bat
 dotnet exec src\LibraryFan\bin\Release\net8.0-windows\LibraryFan.dll --simulate
