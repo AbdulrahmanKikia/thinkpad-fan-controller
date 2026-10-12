@@ -9,7 +9,7 @@ namespace LibraryFan.Setup;
 public static class GitHubRelease
 {
     public const string Owner = "AbdulrahmanKikia";
-    public const string Repository = "library-fan";
+    public const string Repository = "thinkpad-fan-controller";
     public const string Asset = "LibraryFan-try.zip";
     public const int MaxBytes = 20 * 1024 * 1024;
 

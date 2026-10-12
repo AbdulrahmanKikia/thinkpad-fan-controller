@@ -4,9 +4,12 @@ $project = Join-Path $root 'src\LibraryFan\LibraryFan.csproj'
 $out = Join-Path $root 'dist\LibraryFan'
 $zip = Join-Path $root 'dist\LibraryFan-try.zip'
 $dotnet = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
-
 if (-not (Test-Path $dotnet)) {
-    throw "dotnet.exe was not found at $dotnet"
+    $found = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $found) {
+        throw "dotnet.exe was not found."
+    }
+    $dotnet = $found.Source
 }
 
 if (Test-Path $out) {

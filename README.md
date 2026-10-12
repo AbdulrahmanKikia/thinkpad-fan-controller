@@ -28,7 +28,7 @@ Package ThinkPad Fan Controller Utility.cmd
 
 That publishes into `dist\LibraryFan`, zips `dist\LibraryFan-try.zip`, and builds `dist\LibraryFanSetup.exe`. The folder contains `LibraryFan.dll`, `Open ThinkPad Fan Controller Utility.cmd`, `LpcACPIEC.bin`, the LGPL `COPYING` for that module, `hardware-profile.example.json`, and `Read this first.txt`. The person needs the .NET 8 Desktop Runtime and the PawnIO driver from [pawnio.eu](https://pawnio.eu). They do not need this repository.
 
-`LibraryFanSetup.exe` is the file to download. It fetches `LibraryFan-try.zip` from the latest release of [AbdulrahmanKikia/library-fan](https://github.com/AbdulrahmanKikia/library-fan) and installs the DLL folder under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still starts `dotnet exec LibraryFan.dll`. The source is public. There is no release yet, so that download returns 404 until a tagged release contains the zip. Smart App Control can block the unsigned setup exe on this PC.
+`LibraryFanSetup.exe` is the file to download. It fetches `LibraryFan-try.zip` from the latest release of [AbdulrahmanKikia/thinkpad-fan-controller](https://github.com/AbdulrahmanKikia/thinkpad-fan-controller) and installs the DLL folder under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still starts `dotnet exec LibraryFan.dll`. Smart App Control can block the unsigned setup exe on this PC.
 
 ## Build from source
 

@@ -11,7 +11,7 @@ public class PackageInstallTests
     public void The_installer_downloads_the_latest_release_asset_from_github()
     {
         Assert.Equal(
-            "https://github.com/AbdulrahmanKikia/library-fan/releases/latest/download/LibraryFan-try.zip",
+            "https://github.com/AbdulrahmanKikia/thinkpad-fan-controller/releases/latest/download/LibraryFan-try.zip",
             GitHubRelease.LatestAsset.AbsoluteUri);
         Assert.True(GitHubRelease.IsAllowed(new Uri("https://objects.githubusercontent.com/package")));
         Assert.True(GitHubRelease.IsAllowed(new Uri("https://release-assets.githubusercontent.com/package")));
