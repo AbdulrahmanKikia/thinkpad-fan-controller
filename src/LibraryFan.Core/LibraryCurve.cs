@@ -21,6 +21,10 @@ public sealed class LibraryCurve
         new(74, 4)
     ];
 
+    private CurveStep[]? _byTemperature;
+
+    private CurveStep[] ByTemperature => _byTemperature ??= Steps.OrderBy(step => step.Celsius).ToArray();
+
     public int Choose(int temperature, ref int? heldLevel)
     {
         var upward = LevelFor(temperature);
@@ -46,7 +50,7 @@ public sealed class LibraryCurve
     public int LevelFor(int temperature)
     {
         var level = 0;
-        foreach (var step in Steps.OrderBy(step => step.Celsius))
+        foreach (var step in ByTemperature)
         {
             if (temperature >= step.Celsius)
                 level = step.Level;
@@ -56,7 +60,7 @@ public sealed class LibraryCurve
     }
 
     public int EngageCelsius(int level) =>
-        Steps.FirstOrDefault(step => step.Level == level)?.Celsius ?? OffBelowCelsius;
+        ByTemperature.FirstOrDefault(step => step.Level == level)?.Celsius ?? OffBelowCelsius;
 
     public static string DefaultPath() =>
         Path.Combine(AppContext.BaseDirectory, "library-curve.json");
@@ -72,7 +76,7 @@ public sealed class LibraryCurve
 
         return new LibraryCurve
         {
-            OffBelowCelsius = file.OffBelowCelsius,
+            OffBelowCelsius = Math.Min(file.OffBelowCelsius, 55),
             HysteresisCelsius = file.HysteresisCelsius,
             Steps = file.Steps
                 .Where(step => step.Level is >= 1 and <= Registers.MaxLevel)

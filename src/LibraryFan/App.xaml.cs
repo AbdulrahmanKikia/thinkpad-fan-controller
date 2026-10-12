@@ -83,21 +83,42 @@ public partial class App : Application
             return;
 
         var options = LaunchOptions.Parse(e.Args);
-        var window = new MainWindow(CreateClient(options.Simulate), options.Simulate, options.SelfTest);
+        var interactive = !options.Simulate && !options.SelfTest && options.SnapshotPath is null;
+        LogonPreference? preference = null;
+        string? profileId = null;
+        if (interactive)
+            preference = PrepareLaunch(out profileId);
+
+        var client = CreateClient(options.Simulate, profileId, out var machineName);
+        var window = new MainWindow(client, options.Simulate, options.SelfTest, machineName);
         MainWindow = window;
-        window.Show();
+        // The window is hidden on a normal launch, so the last window closing is not
+        // what ends the process. Tray Exit calls Quit, which shuts down explicitly.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        if (preference is not null)
+            window.AttachLogon(preference);
 
         if (options.SimTemperature is int celsius)
             window.SetSimTemperature(celsius);
         if (options.SimMode is ControlMode mode)
             window.Controller.Request(mode, window.Latest?.ManualLevel ?? 1);
 
+        var show = LaunchPresentation.ShowPanel(
+            options.SelfTest,
+            options.SnapshotPath is not null,
+            client.IsOpen,
+            window.HasTray);
+        if (show)
+            window.Show();
+        else
+            window.AnnounceInTray();
+
         if (options.SelfTest)
         {
             window.ContentRendered += async (_, _) =>
             {
                 var ok = await SelfTest.RunAsync(window);
-                Shutdown(ok ? 0 : 1);
+                window.Quit(ok ? 0 : 1);
             };
         }
         else if (options.SnapshotPath is string path)
@@ -107,18 +128,59 @@ public partial class App : Application
                 await window.WaitForUpdateAsync(TimeSpan.FromSeconds(5));
                 await Task.Delay(TimeSpan.FromSeconds(options.SnapshotAfterSeconds));
                 WindowSnapshot.Save(window, path);
-                Shutdown(0);
+                window.Quit();
             };
         }
     }
 
-    private static IEcClient CreateClient(bool simulate)
+    /// <summary>
+    /// First hardware launch asks which computer to command and whether to start with Windows.
+    /// Later launches only refresh the Run key so a moved DLL is still what logon starts.
+    /// The panel is not shown here.
+    /// </summary>
+    private static LogonPreference PrepareLaunch(out string? profileId)
     {
+        var path = AppPreferences.DefaultPath();
+        var preferences = AppPreferences.Load(path);
+        var preference = new LogonPreference(
+            preferences,
+            path,
+            new RegistryLogonStartup(),
+            AppPreferences.StartupCommand(Environment.ProcessPath ?? "dotnet", typeof(App).Assembly.Location));
+
+        if (!preferences.SetupComplete || string.IsNullOrWhiteSpace(preferences.ProfileId))
+        {
+            var setup = new SetupWindow(preferences.StartWithWindows, preferences.ProfileId, HardwareProfile.ReadMachine());
+            setup.ShowDialog();
+            preference.Set(setup.StartWithWindows, setup.ProfileId);
+        }
+        else
+        {
+            preference.Apply();
+        }
+
+        profileId = preference.ProfileId;
+        return preference;
+    }
+
+    private static IEcClient CreateClient(bool simulate, string? profileId, out string machineName)
+    {
+        machineName = EcMap.BuiltIn.Name;
         if (simulate)
             return new SimulatedEc();
+
+        var choice = HardwareProfile.Choose(
+            HardwareProfile.ReadMachine(),
+            HardwareProfile.BesideApp(),
+            HardwareProfile.DefaultPath(),
+            profileId);
+        if (choice.Map is null)
+            return new UnavailableEc(choice.Problem ?? "This machine has no hardware profile, so the fans stay with firmware.");
+
+        machineName = choice.Map.Name;
         if (!IsAdministrator())
-            return new UnavailableEc("Restart as administrator to read the fans.");
-        return PawnIoEcClient.Open();
+            return new UnavailableEc("Restart as administrator to read the fans.", needsAdministrator: true);
+        return PawnIoEcClient.Open(choice.Map);
     }
 
     internal static bool IsAdministrator()

@@ -6,18 +6,36 @@ public static class ThinkPadEc
     /// <summary>After this many registers in a row fail to answer, the rest of the snapshot is skipped.</summary>
     public const int DeadAfter = 3;
 
-    public static FanReading ReadSnapshot(IPortIo ports)
+    public static FanReading ReadSnapshot(IPortIo ports) => ReadSnapshot(ports, EcMap.BuiltIn);
+
+    public static FanReading ReadSnapshot(IPortIo ports, EcMap map)
     {
         var read = 0;
         var failures = 0;
+        int? fan1Rpm = null;
+        int? fan2Rpm = null;
+        var fan1Live = false;
+        var fan2Live = false;
 
-        var fan2 = ReadRpm(ports, Registers.Fan2, ref read, ref failures);
-        var fan1 = ReadRpm(ports, Registers.Fan1, ref read, ref failures);
+        for (var i = map.Fans.Length - 1; i >= 0; i--)
+        {
+            var sample = ReadRpm(ports, map, map.Fans[i], ref read, ref failures);
+            if (i == 0)
+            {
+                fan1Rpm = sample.Rpm;
+                fan1Live = sample.Live;
+            }
+            else
+            {
+                fan2Rpm = sample.Rpm;
+                fan2Live = sample.Live;
+            }
+        }
 
-        var sensors = new SensorSample[Registers.TemperatureAddresses.Length];
+        var sensors = new SensorSample[map.Temperatures.Length];
         for (var i = 0; i < sensors.Length; i++)
         {
-            var address = Registers.TemperatureAddresses[i];
+            var address = map.Temperatures[i];
             byte? raw = null;
             if (failures < DeadAfter && EcBus.TryRead(ports, address, out var value))
             {
@@ -36,34 +54,40 @@ public static class ThinkPadEc
         return new FanReading
         {
             Ok = read > 0,
-            Fan1Rpm = fan1.Rpm,
-            Fan2Rpm = fan2.Rpm,
-            Fan1Live = fan1.Live,
-            Fan2Live = fan2.Live,
+            Fan1Rpm = fan1Rpm,
+            Fan2Rpm = fan2Rpm,
+            Fan1Live = fan1Live,
+            Fan2Live = fan2Live,
             Sensors = sensors,
             RegistersRead = read,
-            RegistersTotal = Registers.SnapshotRegisters
+            RegistersTotal = map.SnapshotRegisters
         };
     }
 
     /// <summary>
-    /// Write one command to both fans and confirm both read-backs. Only 0x80 and levels 0–7
-    /// are accepted. Bit 6, disengaged full speed, is never written.
+    /// Write one command to every fan in the map and confirm the read-backs. Only 0x80 and
+    /// levels 0–7 are accepted. Bit 6, disengaged full speed, is never written.
     /// </summary>
-    public static bool TryCommandBoth(IPortIo ports, byte command)
+    public static bool TryCommandBoth(IPortIo ports, byte command) =>
+        TryCommandBoth(ports, command, EcMap.BuiltIn);
+
+    public static bool TryCommandBoth(IPortIo ports, byte command, EcMap map)
     {
         if (!Registers.IsAllowedCommand(command))
             return false;
 
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            if (WriteFan(ports, Registers.Fan1, command)
-                && WriteFan(ports, Registers.Fan2, command)
-                && ReadFanCommand(ports, Registers.Fan1) == command
-                && ReadFanCommand(ports, Registers.Fan2) == command)
-            {
+            var wrote = true;
+            foreach (var fan in map.Fans)
+                wrote = wrote && WriteFan(ports, map, fan, command);
+
+            var confirmed = wrote;
+            foreach (var fan in map.Fans)
+                confirmed = confirmed && ReadFanCommand(ports, map, fan) == command;
+
+            if (confirmed)
                 return true;
-            }
 
             Thread.Sleep(30);
         }
@@ -71,7 +95,7 @@ public static class ThinkPadEc
         return false;
     }
 
-    private static (int? Rpm, bool Live) ReadRpm(IPortIo ports, byte fan, ref int read, ref int failures)
+    private static (int? Rpm, bool Live) ReadRpm(IPortIo ports, EcMap map, byte fan, ref int read, ref int failures)
     {
         if (failures >= DeadAfter)
         {
@@ -79,9 +103,9 @@ public static class ThinkPadEc
             return (null, false);
         }
 
-        if (!EcBus.TryWrite(ports, Registers.FanSelect, fan)
-            || !EcBus.TryRead(ports, Registers.FanSpeedLow, out var low)
-            || !EcBus.TryRead(ports, Registers.FanSpeedHigh, out var high))
+        if (!EcBus.TryWrite(ports, map.FanSelect, fan)
+            || !EcBus.TryRead(ports, map.SpeedLow, out var low)
+            || !EcBus.TryRead(ports, map.SpeedHigh, out var high))
         {
             failures++;
             return (null, false);
@@ -90,19 +114,19 @@ public static class ThinkPadEc
         read++;
         failures = 0;
         var word = (high << 8) | low;
-        if (word > Registers.StaleRpmAbove)
+        if (word > map.StaleRpmAbove)
             return (null, false);
         return (word, true);
     }
 
-    private static bool WriteFan(IPortIo ports, byte fan, byte command) =>
-        EcBus.TryWrite(ports, Registers.FanSelect, fan)
-        && EcBus.TryWrite(ports, Registers.FanCommand, command);
+    private static bool WriteFan(IPortIo ports, EcMap map, byte fan, byte command) =>
+        EcBus.TryWrite(ports, map.FanSelect, fan)
+        && EcBus.TryWrite(ports, map.FanCommand, command);
 
-    private static byte? ReadFanCommand(IPortIo ports, byte fan)
+    private static byte? ReadFanCommand(IPortIo ports, EcMap map, byte fan)
     {
-        if (!EcBus.TryWrite(ports, Registers.FanSelect, fan))
+        if (!EcBus.TryWrite(ports, map.FanSelect, fan))
             return null;
-        return EcBus.TryRead(ports, Registers.FanCommand, out var value) ? value : null;
+        return EcBus.TryRead(ports, map.FanCommand, out var value) ? value : null;
     }
 }

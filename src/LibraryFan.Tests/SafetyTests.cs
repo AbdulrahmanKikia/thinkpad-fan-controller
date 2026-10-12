@@ -163,4 +163,22 @@ public class SafetyTests
         Assert.Equal(Registers.BiosControl, sim.LastCommand);
         Assert.Equal(0, sim.PortTouches);
     }
+
+    [Fact]
+    public void A_curve_file_cannot_keep_the_fans_off_at_or_above_55()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"library-fan-curve-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(path, """{"offBelowCelsius":70,"hysteresisCelsius":3,"steps":[{"celsius":62,"level":1}]}""");
+            var curve = LibraryCurve.Load(path);
+            Assert.Equal(55, curve.OffBelowCelsius);
+            int? held = null;
+            Assert.Equal(1, curve.Choose(58, ref held));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

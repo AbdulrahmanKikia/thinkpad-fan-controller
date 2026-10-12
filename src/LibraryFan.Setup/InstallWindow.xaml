@@ -1,0 +1,31 @@
+<Window x:Class="LibraryFan.Setup.InstallWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ThinkPad Fan Controller Utility Setup"
+        Width="480" Height="320" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B0E13" Foreground="{StaticResource Ink}"
+        FontFamily="Segoe UI Variable, Segoe UI"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+  <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+          CornerRadius="12" Margin="20" Padding="24">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+      <TextBlock Text="ThinkPad Fan Controller Utility" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+      <TextBlock Grid.Row="1" Margin="0,12,0,0" TextWrapping="Wrap" FontSize="14" LineHeight="20"
+                 Text="This installs ThinkPad Fan Controller Utility from the latest GitHub release. The fans stay with firmware until you choose a mode."/>
+      <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,16,0,0" VerticalAlignment="Bottom"
+                 TextWrapping="Wrap" FontSize="13" LineHeight="18" Foreground="{StaticResource Muted}"
+                 Text="Ready to download LibraryFan-try.zip from GitHub."/>
+      <Button x:Name="InstallButton" Grid.Row="3" Content="Install" HorizontalAlignment="Right"
+              Margin="0,20,0,0" MinWidth="120" Height="40" Padding="16,0" Click="InstallClick"
+              Background="{StaticResource Teal}" Foreground="{StaticResource OnAccent}"
+              BorderBrush="{StaticResource Teal}" FontWeight="SemiBold" Cursor="Hand"/>
+    </Grid>
+  </Border>
+</Window>

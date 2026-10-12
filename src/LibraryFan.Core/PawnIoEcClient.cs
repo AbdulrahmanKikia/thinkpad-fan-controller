@@ -22,11 +22,13 @@ public sealed class PawnIoEcClient : IEcClient
 
     private readonly SafeHandle? _device;
     private readonly PawnPort? _ports;
+    private readonly EcMap _map;
     private readonly Mutex _bus = new(false, BusMutex);
 
-    private PawnIoEcClient(SafeHandle? device, string status)
+    private PawnIoEcClient(SafeHandle? device, string status, EcMap map)
     {
         _device = device;
+        _map = map;
         Status = status;
         if (device is not null)
             _ports = new PawnPort(device);
@@ -35,11 +37,12 @@ public sealed class PawnIoEcClient : IEcClient
     public bool IsOpen => _ports is not null;
     public string Status { get; }
 
-    public static PawnIoEcClient Open()
+    public static PawnIoEcClient Open(EcMap? map = null)
     {
+        map ??= EcMap.BuiltIn;
         var modulePath = Path.Combine(AppContext.BaseDirectory, ModuleFile);
         if (!File.Exists(modulePath))
-            return new PawnIoEcClient(null, $"The PawnIO EC module is missing. Put {ModuleFile} next to LibraryFan.dll.");
+            return new PawnIoEcClient(null, $"The PawnIO EC module is missing. Put {ModuleFile} next to LibraryFan.dll.", map);
 
         var device = CreateFile(DevicePath, GenericReadWrite, ShareReadWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
         if (device.IsInvalid)
@@ -47,8 +50,8 @@ public sealed class PawnIoEcClient : IEcClient
             var error = Marshal.GetLastWin32Error();
             device.Dispose();
             return new PawnIoEcClient(null, error == 5
-                ? "PawnIO refused this process. Start Library Fan as administrator."
-                : "PawnIO is not installed. Install the signed driver from https://pawnio.eu, then start Library Fan as administrator.");
+                ? "PawnIO refused this process. Start ThinkPad Fan Controller Utility as administrator."
+                : "PawnIO is not installed. Install the signed driver from https://pawnio.eu, then start ThinkPad Fan Controller Utility as administrator.", map);
         }
 
         var module = File.ReadAllBytes(modulePath);
@@ -56,25 +59,24 @@ public sealed class PawnIoEcClient : IEcClient
         {
             var error = Marshal.GetLastWin32Error();
             device.Dispose();
-            return new PawnIoEcClient(null, $"PawnIO could not load the EC module (Win32 error {error}).");
+            return new PawnIoEcClient(null, $"PawnIO could not load the EC module (Win32 error {error}).", map);
         }
 
-        return new PawnIoEcClient(device,
-            "PawnIO is reading the embedded controller. Fan levels stay with firmware until both fans have been read and you choose a mode.");
+        return new PawnIoEcClient(device, "", map);
     }
 
     public FanReading Read()
     {
         if (_ports is null)
             return FanReading.Unreadable;
-        return WithBus(() => ThinkPadEc.ReadSnapshot(_ports), out var reading) ? reading : FanReading.Unreadable;
+        return WithBus(() => ThinkPadEc.ReadSnapshot(_ports, _map), out var reading) ? reading : FanReading.Unreadable;
     }
 
     public bool TryWrite(byte command)
     {
         if (_ports is null || !Registers.IsAllowedCommand(command))
             return false;
-        return WithBus(() => ThinkPadEc.TryCommandBoth(_ports, command), out var wrote) && wrote;
+        return WithBus(() => ThinkPadEc.TryCommandBoth(_ports, command, _map), out var wrote) && wrote;
     }
 
     public void RestoreBios() => TryWrite(Registers.BiosControl);
@@ -121,23 +123,53 @@ public sealed class PawnIoEcClient : IEcClient
         public bool ReadPort(ushort port, out byte value)
         {
             value = 0;
-            if (!Execute("ioctl_pio_read", [port], 1, out var output))
+            _words[0] = port;
+            if (!Execute("ioctl_pio_read", _words, inputWords: 1, outputWords: 1, out var output))
                 return false;
             value = (byte)output;
             return true;
         }
 
-        public bool WritePort(ushort port, byte data) =>
-            Execute("ioctl_pio_write", [port, data], 0, out _);
+        public bool WritePort(ushort port, byte data)
+        {
+            _words[0] = port;
+            _words[1] = data;
+            return Execute("ioctl_pio_write", _words, inputWords: 2, outputWords: 0, out _);
+        }
 
-        private bool Execute(string name, ulong[] input, int outputWords, out ulong output)
+        // Reused for every port call. A snapshot is dozens of ioctls, and each one used to
+        // allocate while the EC mutex was held. Reads use the first word; writes use both.
+        private readonly ulong[] _words = new ulong[2];
+        private readonly byte[] _input = new byte[FunctionNameLength + (2 * sizeof(ulong))];
+        private readonly byte[] _output = new byte[sizeof(ulong)];
+
+        private bool Execute(string name, ulong[] input, int inputWords, int outputWords, out ulong output)
         {
             output = 0;
-            var buffer = new byte[FunctionNameLength + (input.Length * sizeof(ulong))];
-            var nameBytes = Encoding.ASCII.GetBytes(name);
-            Buffer.BlockCopy(nameBytes, 0, buffer, 0, Math.Min(nameBytes.Length, FunctionNameLength - 1));
-            if (input.Length > 0)
-                Buffer.BlockCopy(input, 0, buffer, FunctionNameLength, input.Length * sizeof(ulong));
+            if (inputWords > 2 || outputWords > 1)
+                return ExecuteAllocated(name, input, inputWords, outputWords, out output);
+
+            Array.Clear(_input, 0, FunctionNameLength);
+            Encoding.ASCII.GetBytes(name, _input.AsSpan(0, FunctionNameLength - 1));
+            var inputBytes = FunctionNameLength + (inputWords * sizeof(ulong));
+            if (inputWords > 0)
+                Buffer.BlockCopy(input, 0, _input, FunctionNameLength, inputWords * sizeof(ulong));
+
+            var result = outputWords == 0 ? null : _output;
+            if (!DeviceIoControl(_device, Ioctl.Execute, _input, (uint)inputBytes, result, (uint)(result?.Length ?? 0), out var returned, IntPtr.Zero))
+                return false;
+            if (result is not null && returned >= sizeof(ulong))
+                output = BitConverter.ToUInt64(result, 0);
+            return true;
+        }
+
+        private bool ExecuteAllocated(string name, ulong[] input, int inputWords, int outputWords, out ulong output)
+        {
+            output = 0;
+            var buffer = new byte[FunctionNameLength + (inputWords * sizeof(ulong))];
+            Encoding.ASCII.GetBytes(name, buffer.AsSpan(0, FunctionNameLength - 1));
+            if (inputWords > 0)
+                Buffer.BlockCopy(input, 0, buffer, FunctionNameLength, inputWords * sizeof(ulong));
 
             var result = outputWords == 0 ? null : new byte[outputWords * sizeof(ulong)];
             if (!DeviceIoControl(_device, Ioctl.Execute, buffer, (uint)buffer.Length, result, (uint)(result?.Length ?? 0), out var returned, IntPtr.Zero))

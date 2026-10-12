@@ -1,8 +1,7 @@
-using System.Runtime.InteropServices;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -19,14 +18,22 @@ public partial class MainWindow : Window
 
     private readonly bool _simulate;
     private TrayIcon? _tray;
+    private bool _quit;
+    private SensorTile[]? _sensorTiles;
+    private double _traceChromeWidth;
+    private double _traceChromeHeight;
+    private readonly List<UIElement> _traceSeries = new();
 
     internal FanController Controller { get; }
     internal FanUpdate? Latest { get; private set; }
+    internal bool HasTray => _tray is not null;
 
-    public MainWindow(IEcClient client, bool simulate, bool selfTest)
+    public MainWindow(IEcClient client, bool simulate, bool selfTest, string? machineName = null)
     {
         InitializeComponent();
         _simulate = simulate;
+        if (!string.IsNullOrWhiteSpace(machineName))
+            MachineNameText.Text = machineName;
         Controller = new FanController(client);
         Controller.Updated += OnUpdated;
 
@@ -42,9 +49,16 @@ public partial class MainWindow : Window
         BuildCurveChips(Controller.Session.Curve);
         if (!selfTest)
             BuildTray();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible && Latest is not null)
+                Paint(Latest);
+        };
 
         SystemEvents.SessionEnding += OnSessionEnding;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        Closing += OnClosing;
+        StateChanged += OnStateChanged;
         Closed += (_, _) =>
         {
             SystemEvents.SessionEnding -= OnSessionEnding;
@@ -58,16 +72,14 @@ public partial class MainWindow : Window
                 PaintTrace(Latest.Trace);
         };
 
-        if (!selfTest && !simulate && client is UnavailableEc)
+        if (!selfTest && !simulate && client is UnavailableEc unavailable && unavailable.NeedsAdministrator)
             ShowElevateHint(client.Status);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        var hwnd = new WindowInteropHelper(this).Handle;
-        var dark = 1;
-        DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
+        WindowFrame.Apply(this);
 
         var area = SystemParameters.WorkArea;
         if (Width > area.Width - 24)
@@ -99,6 +111,38 @@ public partial class MainWindow : Window
 
     internal static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
+    /// <summary>
+    /// The X, Alt+F4, and minimize put the panel away. The controller keeps running.
+    /// Only <see cref="Quit"/> closes for real, and that is what restores firmware.
+    /// </summary>
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (_quit || _tray is null)
+            return;
+        e.Cancel = true;
+        Hide();
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e)
+    {
+        if (WindowState != WindowState.Minimized || _quit || _tray is null)
+            return;
+        Hide();
+        WindowState = WindowState.Normal;
+    }
+
+    /// <summary>Closes the panel for real and ends the process. This is the tray Exit path.</summary>
+    internal void Quit(int code = 0)
+    {
+        _quit = true;
+        Close();
+        System.Windows.Application.Current?.Shutdown(code);
+    }
+
+    /// <summary>One notice when the app starts with nothing on screen, so the tray icon can be found.</summary>
+    internal void AnnounceInTray() =>
+        _tray?.ShowBalloon("ThinkPad Fan Controller Utility is in the tray. BIOS is in control.");
+
     private void BiosClick(object sender, RoutedEventArgs e) => Controller.Request(ControlMode.Bios);
 
     private void LibraryClick(object sender, RoutedEventArgs e) => Controller.Request(ControlMode.Library);
@@ -122,10 +166,19 @@ public partial class MainWindow : Window
         }
 
         Latest = update;
+        _tray?.Update(update);
+        if (!IsVisible)
+            return;
+        Paint(update);
+    }
+
+    private void Paint(FanUpdate update)
+    {
         ReasonText.Text = update.Reason;
         RefusalText.Text = update.Refusal ?? "";
         RefusalText.Visibility = string.IsNullOrEmpty(update.Refusal) ? Visibility.Collapsed : Visibility.Visible;
         StatusText.Text = update.DriverStatus;
+        StatusText.Visibility = string.IsNullOrEmpty(update.DriverStatus) ? Visibility.Collapsed : Visibility.Visible;
         HealthText.Text = update.Health;
 
         Fan1.Show(update.Fan1Rpm, update.Fan1Held, "Fan 1", update.CommandLabel);
@@ -139,7 +192,6 @@ public partial class MainWindow : Window
         PaintMode(update);
         PaintSensors(update.Sensors);
         PaintTrace(update.Trace);
-        _tray?.SetText(update.Reason);
     }
 
     /// <summary>Teal below 65°C, amber from 65°C, coral at the 80°C handoff. Shared by the gauges and the sensor bars.</summary>
@@ -209,59 +261,21 @@ public partial class MainWindow : Window
 
     private void PaintSensors(SensorSample[] sensors)
     {
-        SensorHost.Children.Clear();
-        var hottest = sensors.Where(sensor => sensor.IsValid).MaxBy(sensor => sensor.Celsius);
-        foreach (var sensor in sensors)
+        if (_sensorTiles is null || _sensorTiles.Length != sensors.Length)
         {
-            var tile = new Border
+            SensorHost.Children.Clear();
+            _sensorTiles = new SensorTile[sensors.Length];
+            for (var i = 0; i < sensors.Length; i++)
             {
-                Style = (Style)FindResource("Surface"),
-                Background = Brush("Raised"),
-                Padding = new Thickness(12, 8, 12, 8),
-                Margin = new Thickness(4),
-                MinHeight = 56
-            };
-            if (sensor.IsValid && sensor.Celsius >= FanSession.DangerCelsius)
-                tile.BorderBrush = Brush("Coral");
-            else if (hottest is not null && sensor.Address == hottest.Address)
-                tile.BorderBrush = Brush("Teal");
-
-            var value = sensor.IsValid ? $"{sensor.Celsius}°" : sensor.WasRead ? "—" : "…";
-            var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            stack.Children.Add(new TextBlock
-            {
-                Text = sensor.Label,
-                Foreground = Brush("Muted"),
-                FontSize = 11,
-                FontWeight = FontWeights.SemiBold
-            });
-            stack.Children.Add(new TextBlock
-            {
-                Text = value,
-                Foreground = sensor.IsValid ? Brush("Ink") : Brush("Muted"),
-                FontSize = 18,
-                FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 2, 0, 0)
-            });
-            stack.Children.Add(HeatBar(sensor.Celsius));
-            tile.Child = stack;
-            SensorHost.Children.Add(tile);
+                var tile = SensorTile.Create((Style)FindResource("Surface"), Brush("Raised"), Brush("Line"), Brush("Muted"));
+                _sensorTiles[i] = tile;
+                SensorHost.Children.Add(tile.Root);
+            }
         }
-    }
 
-    /// <summary>A 4px bar from 30°C to 90°C under each reading. Missing and unread bytes show the empty track.</summary>
-    private Grid HeatBar(int? celsius)
-    {
-        var share = celsius is int value ? Math.Clamp((value - TraceMinCelsius) / (TraceMaxCelsius - TraceMinCelsius), 0, 1) : 0;
-        var bar = new Grid { Height = 4, Margin = new Thickness(0, 8, 0, 0) };
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(share, 0.001), GridUnitType.Star) });
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(1 - share, 0.001), GridUnitType.Star) });
-        var track = new Border { Background = Brush("Line"), CornerRadius = new CornerRadius(2) };
-        Grid.SetColumnSpan(track, 2);
-        bar.Children.Add(track);
-        if (share > 0)
-            bar.Children.Add(new Border { Background = Brush(HeatKey(celsius)), CornerRadius = new CornerRadius(2) });
-        return bar;
+        var hottest = sensors.Where(sensor => sensor.IsValid).MaxBy(sensor => sensor.Celsius);
+        for (var i = 0; i < sensors.Length; i++)
+            _sensorTiles[i].Update(sensors[i], hottest, Brush, HeatKey);
     }
 
     /// <summary>
@@ -271,19 +285,51 @@ public partial class MainWindow : Window
     /// </summary>
     private void PaintTrace(IReadOnlyList<TraceSample> trace)
     {
-        TraceCanvas.Children.Clear();
         TracePlaceholder.Visibility = trace.Count < 2 ? Visibility.Visible : Visibility.Collapsed;
-        if (trace.Count < 2)
-            return;
         var width = TraceCanvas.ActualWidth;
         var height = TraceCanvas.ActualHeight;
         if (width < 120 || height < 60)
             return;
 
-        var plot = new Rect(30, 6, width - 30 - 32, height - 6 - 18);
+        if (Math.Abs(width - _traceChromeWidth) > 0.5 || Math.Abs(height - _traceChromeHeight) > 0.5)
+        {
+            TraceCanvas.Children.Clear();
+            _traceSeries.Clear();
+            DrawTraceChrome(width, height);
+            _traceChromeWidth = width;
+            _traceChromeHeight = height;
+        }
+        else
+        {
+            foreach (var item in _traceSeries)
+                TraceCanvas.Children.Remove(item);
+            _traceSeries.Clear();
+        }
+
+        if (trace.Count < 2)
+            return;
+
+        var plot = PlotOf(width, height);
         double YForCelsius(double celsius) =>
             plot.Bottom - (Math.Clamp((celsius - TraceMinCelsius) / (TraceMaxCelsius - TraceMinCelsius), 0, 1) * plot.Height);
         double YForRpm(double rpm) => plot.Bottom - (Math.Clamp(rpm / FanRing.GaugeMaxRpm, 0, 1) * plot.Height);
+
+        var temperature = Polyline(trace, plot, sample => YForCelsius(sample.Celsius), Brush("Teal"));
+        var speed = Polyline(trace, plot, sample => YForRpm(sample.Rpm), Brush("Amber"));
+        AddSeries(speed);
+        AddSeries(temperature);
+        AddSeries(EndDot(speed.Points[^1], "Amber"));
+        AddSeries(EndDot(temperature.Points[^1], "Teal"));
+    }
+
+    private static Rect PlotOf(double width, double height) =>
+        new(30, 6, Math.Max(0, width - 62), Math.Max(0, height - 24));
+
+    private void DrawTraceChrome(double width, double height)
+    {
+        var plot = PlotOf(width, height);
+        double YForCelsius(double celsius) =>
+            plot.Bottom - (Math.Clamp((celsius - TraceMinCelsius) / (TraceMaxCelsius - TraceMinCelsius), 0, 1) * plot.Height);
 
         for (var band = 0; band <= 3; band++)
         {
@@ -322,13 +368,12 @@ public partial class MainWindow : Window
             Canvas.SetTop(label, plot.Bottom + 5);
             TraceCanvas.Children.Add(label);
         }
+    }
 
-        var temperature = Polyline(trace, plot, sample => YForCelsius(sample.Celsius), Brush("Teal"));
-        var speed = Polyline(trace, plot, sample => YForRpm(sample.Rpm), Brush("Amber"));
-        TraceCanvas.Children.Add(speed);
-        TraceCanvas.Children.Add(temperature);
-        EndDot(speed.Points[^1], "Amber");
-        EndDot(temperature.Points[^1], "Teal");
+    private void AddSeries(UIElement element)
+    {
+        TraceCanvas.Children.Add(element);
+        _traceSeries.Add(element);
     }
 
     private void AxisLabel(string text, double x, double y, bool right, string key)
@@ -340,12 +385,12 @@ public partial class MainWindow : Window
         TraceCanvas.Children.Add(label);
     }
 
-    private void EndDot(Point point, string key)
+    private Border EndDot(Point point, string key)
     {
         var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Brush(key) };
         Canvas.SetLeft(dot, point.X - 4);
         Canvas.SetTop(dot, point.Y - 4);
-        TraceCanvas.Children.Add(dot);
+        return dot;
     }
 
     private static Shapes.Polyline Polyline(IReadOnlyList<TraceSample> trace, Rect plot, Func<TraceSample, double> y, System.Windows.Media.Brush stroke)
@@ -428,9 +473,27 @@ public partial class MainWindow : Window
             WindowState = WindowState.Normal;
             Activate();
         };
-        _tray.BiosRequested += () => Controller.Request(ControlMode.Bios);
-        _tray.LibraryRequested += () => Controller.Request(ControlMode.Library);
-        _tray.ExitRequested += Close;
+        _tray.ModeRequested += (mode, level) =>
+        {
+            var update = Controller.Request(mode, mode == ControlMode.Manual ? level : Latest?.ManualLevel ?? 1);
+            // A refusal from the menu has no panel to appear on, so it goes to a balloon.
+            if (!IsVisible && !string.IsNullOrEmpty(update.Refusal))
+                _tray.ShowBalloon(update.Refusal);
+        };
+        _tray.ExitRequested += () => Quit();
+    }
+
+    /// <summary>The tray's startup row. Checked means Windows starts this process, still hidden.</summary>
+    internal void AttachLogon(LogonPreference preference)
+    {
+        if (_tray is null)
+            return;
+        _tray.SetStartWithWindows(preference.StartWithWindows);
+        _tray.StartWithWindowsChanged += enabled =>
+        {
+            preference.Set(enabled);
+            _tray.SetStartWithWindows(preference.StartWithWindows);
+        };
     }
 
     private void ShowElevateHint(string status)
@@ -444,6 +507,9 @@ public partial class MainWindow : Window
             Style = (Style)FindResource("ModeButton")
         };
         restart.Click += (_, _) => App.RelaunchElevated();
+        restart.Background = Brush("Teal");
+        restart.Foreground = Brush("OnAccent");
+        restart.BorderBrush = Brush("Teal");
         StatusHost.Children.Add(restart);
     }
 
@@ -455,9 +521,4 @@ public partial class MainWindow : Window
     }
 
     private System.Windows.Media.Brush Brush(string key) => (System.Windows.Media.Brush)FindResource(key);
-
-    private const int DwmUseImmersiveDarkMode = 20;
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }

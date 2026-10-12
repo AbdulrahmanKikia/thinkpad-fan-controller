@@ -30,7 +30,7 @@ public partial class FanRing : UserControl
         SetAccent((Brush)FindResource("Teal"));
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(32) };
         _timer.Tick += Advance;
-        _timer.Start();
+        IsVisibleChanged += (_, _) => SyncRotor();
         Show(null, false, "Fan", "Firmware");
     }
 
@@ -47,6 +47,7 @@ public partial class FanRing : UserControl
             UnitText.Text = "NO READING";
             Fill.Data = Geometry.Empty;
             Rotor.Opacity = 0.18;
+            SyncRotor();
             return;
         }
 
@@ -60,12 +61,27 @@ public partial class FanRing : UserControl
             RpmText.Text = "0";
             UnitText.Text = "STOPPED";
             Rotor.Opacity = 0.28;
+            SyncRotor();
             return;
         }
 
         RpmText.Text = rpm.Value.ToString();
         UnitText.Text = held ? "LAST READ" : "RPM";
         Rotor.Opacity = held ? 0.4 : 0.75;
+        SyncRotor();
+    }
+
+    /// <summary>The rotor only turns while the panel is on screen and the fan is moving.</summary>
+    private void SyncRotor()
+    {
+        if (IsVisible && _rpm > 0)
+        {
+            _last = DateTime.UtcNow;
+            _timer.Start();
+            return;
+        }
+
+        _timer.Stop();
     }
 
     public void SetAccent(Brush brush)

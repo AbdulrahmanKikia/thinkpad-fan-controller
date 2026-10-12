@@ -17,7 +17,7 @@ public sealed class SimulatedEc : IEcClient
     }
 
     public bool IsOpen => true;
-    public string Status => "Simulator. No embedded-controller ports are open.";
+    public string Status => "Practice mode.";
     public byte? LastCommand { get; private set; }
     public int WriteCount { get; private set; }
     public int PortTouches => 0;
@@ -109,9 +109,14 @@ public sealed class SimulatedEc : IEcClient
 /// <summary>Stands in for the driver when it is missing or the process is not elevated.</summary>
 public sealed class UnavailableEc : IEcClient
 {
-    public UnavailableEc(string status) => Status = status;
+    public UnavailableEc(string status, bool needsAdministrator = false)
+    {
+        Status = status;
+        NeedsAdministrator = needsAdministrator;
+    }
 
     public bool IsOpen => false;
+    public bool NeedsAdministrator { get; }
     public string Status { get; }
 
     public FanReading Read() => FanReading.Unreadable;

@@ -1,6 +1,6 @@
 ---
 name: fan-safety
-description: Stops Library Fan from commanding the ThinkPad fans when that is unsafe. Use when changing Library mode, Manual mode, the safety guard, temperature thresholds, exit or sleep handling, or any write to register 0x2F.
+description: Stops ThinkPad Fan Controller Utility from commanding the ThinkPad fans when that is unsafe. Use when changing Library mode, Manual mode, the safety guard, temperature thresholds, exit or sleep handling, or any write to register 0x2F.
 ---
 
 # Fan safety
@@ -28,7 +28,7 @@ Library and Manual stay refused while any valid sensor is still at or above 80°
 ## Other stops
 
 - Three unreadable polls in a row write `0x80` and latch BIOS. A single good reading at 80°C does not wait for that streak.
-- Exit, shutdown, and sleep write `0x80` to both fans.
+- Exit, shutdown, and sleep write `0x80` to both fans. Hiding the window, including the X and minimize, is not an exit and does not write `0x80`. The chosen mode keeps running until tray Exit.
 - Steady BIOS mode does not keep writing. Lenovo Vantage is left alone.
 - Library never commands level 0 once any valid sensor is at or above 55°C. Manual may command a low level. The 80°C handoff takes that choice away.
 - Level commands `0`–`7` stay disabled until both fan RPM values have been read live in this session. `0x80` is the restore command and is not a level.

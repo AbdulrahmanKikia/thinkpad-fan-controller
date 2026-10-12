@@ -1,0 +1,14 @@
+{
+  "name": "ThinkPad P1 Gen 3",
+  "product": "20TH000XUS",
+  "bios": "N2VET41W",
+  "dataPort": "0x62",
+  "controlPort": "0x66",
+  "fanSelect": "0x31",
+  "fans": ["0x00", "0x01"],
+  "fanCommand": "0x2F",
+  "speedLow": "0x84",
+  "speedHigh": "0x85",
+  "staleRpmAbove": 8191,
+  "temperatures": ["0x78", "0x79", "0x7A", "0x7B", "0x7C", "0x7D", "0x7E", "0x7F", "0xC0", "0xC1", "0xC2", "0xC3"]
+}

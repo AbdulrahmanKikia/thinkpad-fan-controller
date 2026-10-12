@@ -1,6 +1,10 @@
-# Library Fan post-mortem
+# ThinkPad Fan Controller Utility — development record
 
 6 October 2026. Written so this repository can be read, and only then published, with the failures still attached.
+
+This record uses the name Library Fan. That was the name of the project on the days it describes. The name was later changed to ThinkPad Fan Controller Utility.
+
+The later account, including work done after this file, is [DOCUMENTATION.md](DOCUMENTATION.md). Logon startup, the tray, the computer menu, and packaging now exist. Statements below that say they do not are the state of 6–7 October.
 
 ## Result
 

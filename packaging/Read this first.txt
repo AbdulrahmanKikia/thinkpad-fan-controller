@@ -1,0 +1,33 @@
+ThinkPad Fan Controller Utility
+
+This program was formerly called Library Fan. The name was changed to ThinkPad Fan Controller Utility.
+
+This folder runs on Windows. Double-click "Open ThinkPad Fan Controller Utility.cmd" after the two installs below.
+
+1. Install the .NET 8 Desktop Runtime, x64:
+   https://dotnet.microsoft.com/download/dotnet/8
+   Choose Desktop Runtime. The SDK is not required.
+
+2. Install the signed PawnIO driver from https://pawnio.eu and approve its prompt.
+   LpcACPIEC.bin in this folder is the fan module that driver loads.
+   COPYING is the LGPL-2.1 license for that module.
+
+Windows asks for administrator rights so the app can read the fans. The signed
+dotnet.exe starts LibraryFan.dll. This folder has no LibraryFan.exe.
+
+The first window asks which computer this is, and whether to start with Windows.
+The app then stays in the notification area. Open the panel from the tray icon.
+Firmware keeps the fans until you choose Library or Manual from the tray or the panel.
+
+The menu can command a ThinkPad P1 Gen 3, X1 Extreme Gen 3, P15 Gen 2, or
+P14s Gen 5 Intel when this computer's product code matches that model.
+Choosing Dell, HP, or Framework leaves the fans with firmware. Any other
+computer does the same.
+
+hardware-profile.example.json is this P1 Gen 3 map, written out so the fields
+are visible. Leave that name. A file named hardware-profile.json next to
+LibraryFan.dll is used only when its product matches this computer.
+
+To look at the window with no fan commands, open a terminal in this folder:
+
+  "%ProgramFiles%\dotnet\dotnet.exe" exec LibraryFan.dll --simulate

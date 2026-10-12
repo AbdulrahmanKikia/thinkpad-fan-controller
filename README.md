@@ -1,26 +1,42 @@
-# Library Fan
+# ThinkPad Fan Controller Utility
 
-Library Fan is a Windows controller for one laptop: a ThinkPad P1 Gen 3, model `20TH000XUS`, BIOS `N2VET41W (1.26)`. It keeps the fans quieter while the machine is cool, shows both fans and the temperature registers live, and gives the fans back to firmware if a sensor reaches 80°C.
+ThinkPad Fan Controller Utility is a Windows fan controller for a ThinkPad whose embedded-controller map is already known. The project was formerly called Library Fan. The name was changed so the purpose is clear to anyone reading the repository.
 
-It is not a general ThinkPad utility. Other models use other ports and other registers. Writing the wrong byte can leave a fan stuck until reboot.
+The map in this repository was copied from other people's work, then read on one ThinkPad P1 Gen 3 (`20TH000XUS`, BIOS `N2VET41W`). It can hold both fans to one level, show the measured speeds and the temperature registers, and hand the fans back to firmware at 80°C. It cannot command an unknown laptop, and it cannot command Dell, HP, or Framework.
 
-Read [POSTMORTEM.md](POSTMORTEM.md) before publishing or running this on hardware.
+Read [DOCUMENTATION.md](DOCUMENTATION.md) for what it does, what it refuses, and the difficulties in order. [POSTMORTEM.md](POSTMORTEM.md) is the lab record from the first two days.
+
+## Built on other people's work
+
+The register map is copied from [nikolasgd/TPFanControl-dual-fan](https://github.com/nikolasgd/TPFanControl-dual-fan) `fancontrol/fanstuff.cpp`. That project is a fork of [byrnes/TPFanControl](https://github.com/byrnes/TPFanControl) and points at the original [TPFanControl](https://sourceforge.net/projects/tp4xfancontrol/). Port access is the signed driver from [pawnio.eu](https://pawnio.eu). The vendored `LpcACPIEC.bin` is from [namazso/PawnIO.Modules](https://github.com/namazso/PawnIO.Modules) 0.2.11, LGPL-2.1, with `third_party/pawnio/COPYING` beside it. Those projects are the source of the protocol. This repository did not invent it. The application code is under the MIT License in [LICENSE](LICENSE). `third_party/pawnio` remains LGPL-2.1-or-later.
 
 ## Run
 
 Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8) and the signed driver from [pawnio.eu](https://pawnio.eu). Then double-click:
 
 ```bat
-Open Library Fan.cmd
+Open ThinkPad Fan Controller Utility.cmd
 ```
 
-That builds the Release output on first use and starts `LibraryFan.dll` under the signed `dotnet.exe`. There is no `LibraryFan.exe`: the project sets `UseAppHost=false` because Smart App Control blocks an unsigned apphost on this PC. The window opens without hardware access and offers **Restart as administrator**; approve the prompt. It starts in BIOS mode and does not command the fans until you choose Library or Manual.
+That builds the Release output on first use and starts `LibraryFan.dll` under the signed `dotnet.exe`. There is no `LibraryFan.exe`: the project sets `UseAppHost=false` because Smart App Control blocks an unsigned apphost on this PC. The first launch asks which computer to command and whether to start with Windows. Either choice leaves the panel hidden in the notification area; open it from the tray icon. Without administrator rights the panel opens on its own and offers **Restart as administrator**. It starts in BIOS mode and does not command the fans until you choose Library or Manual.
+
+## Give someone a folder
+
+```bat
+Package ThinkPad Fan Controller Utility.cmd
+```
+
+That publishes into `dist\LibraryFan`, zips `dist\LibraryFan-try.zip`, and builds `dist\LibraryFanSetup.exe`. The folder contains `LibraryFan.dll`, `Open ThinkPad Fan Controller Utility.cmd`, `LpcACPIEC.bin`, the LGPL `COPYING` for that module, `hardware-profile.example.json`, and `Read this first.txt`. The person needs the .NET 8 Desktop Runtime and the PawnIO driver from [pawnio.eu](https://pawnio.eu). They do not need this repository.
+
+`LibraryFanSetup.exe` is the file to download. It fetches `LibraryFan-try.zip` from the latest release of [AbdulrahmanKikia/library-fan](https://github.com/AbdulrahmanKikia/library-fan) and installs the DLL folder under `%LocalAppData%\LibraryFan\App`, with a Start menu item that still starts `dotnet exec LibraryFan.dll`. The repository is private and has no release yet, so that download returns 404 until a public release contains the zip. Smart App Control can block the unsigned setup exe on this PC.
 
 ```bat
 dotnet exec src\LibraryFan\bin\Release\net8.0-windows\LibraryFan.dll --simulate
 ```
 
 `--simulate` draws the same window against a fake controller and performs no port I/O. `--self-test` runs the 80°C handoff and the read-failure cases on that fake controller and exits with 0 when they pass.
+
+On this P1 Gen 3 with BIOS `N2VET41W`, no extra file is required. Any other machine keeps its fans with firmware until someone who knows that machine's embedded-controller map adds `hardware-profile.json` next to `LibraryFan.dll` (or under `%LocalAppData%\LibraryFan\`). The file has to name that machine's product. It can move the fan-select register, the fan selectors, the command register, the speed word, and the temperature bytes. It cannot change the firmware byte `0x80`, set bit 6, raise the 80°C handoff, or use ports other than `0x62` and `0x66`, which are the only ports PawnIO opens. [hardware-profile.example.json](hardware-profile.example.json) is this laptop's map, for the shape of the file. Copying it onto a different model unchanged does nothing, because the product will not match.
 
 To look at the window without a screen capture, which returns black once the app is elevated, let the app render itself:
 

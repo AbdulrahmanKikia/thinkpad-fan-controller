@@ -1,0 +1,118 @@
+<Window x:Class="LibraryFan.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LibraryFan"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="ThinkPad Fan Controller Utility"
+        Width="520" Height="500" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B0E13" Foreground="{StaticResource Ink}"
+        FontFamily="Segoe UI Variable, Segoe UI"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        AutomationProperties.AutomationId="LibraryFanSetup">
+  <Window.Resources>
+    <Style x:Key="MachineMenu" TargetType="ComboBox">
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+      <Setter Property="Background" Value="{StaticResource Raised}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid>
+              <ToggleButton Focusable="False" ClickMode="Press" Cursor="Hand"
+                            IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="{StaticResource Raised}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8">
+                      <Path Width="8" Height="4" HorizontalAlignment="Right" Margin="0,0,14,0"
+                            Data="M 0 0 L 4 4 L 8 0" Stroke="{StaticResource Muted}" StrokeThickness="1.5"
+                            StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Border>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter Margin="12,0,36,0" VerticalAlignment="Center" HorizontalAlignment="Left"
+                                Content="{TemplateBinding SelectionBoxItem}"
+                                ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
+              <Popup Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide"
+                     IsOpen="{TemplateBinding IsDropDownOpen}">
+                <Border Margin="0,4,0,0" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                        Background="{StaticResource Raised}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8">
+                  <ScrollViewer MaxHeight="240" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsPresenter/>
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="MachineMenuItem" TargetType="ComboBoxItem">
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+      <Setter Property="Background" Value="{StaticResource Raised}"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="Row" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Row" Property="Background" Value="{StaticResource Well}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="56" ResizeBorderThickness="0" GlassFrameThickness="0" UseAeroCaptionButtons="True"/>
+  </shell:WindowChrome.WindowChrome>
+  <Grid>
+    <Grid Height="56" Margin="20,0,120,0" VerticalAlignment="Top">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <local:FanMark VerticalAlignment="Center"/>
+        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+          <TextBlock Text="ThinkPad Fan Controller Utility" FontSize="15" FontWeight="SemiBold"/>
+          <TextBlock Text="Choose a computer" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,1,0,0"/>
+        </StackPanel>
+      </StackPanel>
+    </Grid>
+    <Border Style="{StaticResource Surface}" Margin="20,64,20,20" Padding="24">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock TextWrapping="Wrap" FontSize="15" LineHeight="22"
+                   Text="ThinkPad Fan Controller Utility stays in the notification area. Choose the computer it may command."/>
+        <TextBlock Grid.Row="1" TextWrapping="Wrap" Margin="0,12,0,0" FontSize="13" LineHeight="18"
+                   Foreground="{StaticResource Muted}"
+                   Text="A choice is used only when this computer's product code matches. Firmware keeps the fans until you choose a mode."/>
+        <TextBlock Grid.Row="2" Text="Computer" Style="{StaticResource SectionLabel}" Margin="0,16,0,6"/>
+        <ComboBox x:Name="MachineBox" Grid.Row="3" Height="40" FontSize="14"
+                  Style="{StaticResource MachineMenu}" ItemContainerStyle="{StaticResource MachineMenuItem}"
+                  DisplayMemberPath="Label" AutomationProperties.AutomationId="MachineMenu"/>
+        <TextBlock x:Name="MatchNote" Grid.Row="4" TextWrapping="Wrap" Margin="0,10,0,0"
+                   FontSize="13" LineHeight="18" Foreground="{StaticResource Muted}"/>
+        <CheckBox x:Name="StartWithWindowsBox" Grid.Row="6" VerticalAlignment="Bottom"
+                  Content="Start with Windows" FontSize="14" FontWeight="SemiBold"
+                  Foreground="{StaticResource Ink}" Margin="0,16,0,16"/>
+        <Button x:Name="ContinueButton" Grid.Row="7" Content="Continue" HorizontalAlignment="Right"
+                MinWidth="120" Style="{StaticResource ModeButton}" IsDefault="True" Click="ContinueClick"
+                Background="{StaticResource Teal}" Foreground="{StaticResource OnAccent}" BorderBrush="{StaticResource Teal}"/>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

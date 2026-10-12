@@ -46,3 +46,7 @@ The Windows ACPI driver uses the same two ports, so a single byte read can time 
 PawnIO is the only driver. Do not reference WinRing0, TVicPort, or any other unsigned port driver. `--simulate` uses `SimulatedEc` and performs no port I/O.
 
 PawnIO call details that have actually succeeded on this machine belong in `reference.md` next to this skill. Do not put ioctl numbers in this file.
+
+## A profile for another machine
+
+The same protocol can be aimed at another computer only by a file a person wrote for that computer. `hardware-profile.json` beside `LibraryFan.dll`, or in `%LocalAppData%\LibraryFan\`, is read before the built-in map. It is used only when its `product` matches the machine that is running. It can relocate `fanSelect`, the fan selectors, `fanCommand`, the speed word, and the temperature bytes. It cannot change the firmware command `0x80`, set bit 6, raise the 80°C handoff, or name ports other than `0x62` and `0x66`. Without a matching file, the setup menu can apply that same copied map only to a ThinkPad whose product type is already known: P1 Gen 3 (`20TH`, BIOS contains `N2VET41W`), X1 Extreme Gen 3 (`20TK`, `20TL`), P15 Gen 2 (`20YQ`, `20YR`), and P14s Gen 5 Intel (`21G2`, `21G3`). Dell, HP, and Framework are in the menu and are never given this map. Any other machine is left with firmware. Do not invent offsets for a machine that is not in that list; a file the person wrote is how a further machine is named. `hardware-profile.example.json` is this machine's map, written out so the fields are visible.
